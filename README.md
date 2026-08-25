@@ -1,5 +1,9 @@
 <img width="850" height="423" alt="githubbanner" src="https://github.com/user-attachments/assets/121751f1-c4ed-4236-ad62-5d8b79254a02" />
 
+  [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge\&logo=discord\&logoColor=white)](https://discord.gg/BwYc74dEv)
+
+</div>
+
 # 🍋 Lemonyde (Rust edition)
 An unofficial, community-made **bootstrapper for Sober** — the [VinegarHQ](https://sober.vinegarhq.org)
 flatpak that runs Roblox on Linux. Lemonyde gives Sober a native GTK4 +

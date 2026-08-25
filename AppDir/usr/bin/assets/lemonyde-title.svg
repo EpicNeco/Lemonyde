@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 100" width="480" height="100">
+  <defs>
+    <linearGradient id="lemonydeGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff066"/>
+      <stop offset="70%" stop-color="#f0ec5f"/>
+      <stop offset="100%" stop-color="#8fce55"/>
+    </linearGradient>
+  </defs>
+  <text
+    x="6" y="76"
+    font-family="Sans, 'DejaVu Sans', sans-serif"
+    font-weight="800"
+    font-size="72"
+    letter-spacing="-1"
+    fill="url(#lemonydeGreen)"
+  >Lemonyde</text>
+</svg>

@@ -1,0 +1,11 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Type=Application
+Name=Lemonyde
+Comment=Bootstrapper & FFlag editor for the Sober flatpak (Roblox on Linux)
+Exec=lemonyde
+Icon=lemonyde
+Terminal=false
+Categories=Game;Utility;
+Keywords=Roblox;Sober;Vinegar;FFlags;FastFlags;
+StartupWMClass=lemonyde

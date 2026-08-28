@@ -4,7 +4,7 @@
 
 </div>
 
-# 🍋 Lemonyde (Rust edition)
+# 🍹🍋 Lemonyde (Rust edition)
 An unofficial, community-made **bootstrapper for Sober** — the [VinegarHQ](https://sober.vinegarhq.org)
 flatpak that runs Roblox on Linux. Lemonyde gives Sober a native GTK4 +
 libadwaita GUI for the stuff you'd otherwise do by hand in a terminal or

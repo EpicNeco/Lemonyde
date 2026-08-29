@@ -1,6 +1,6 @@
 <img width="850" height="423" alt="githubbanner" src="https://github.com/user-attachments/assets/121751f1-c4ed-4236-ad62-5d8b79254a02" />
 
-  [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge\&logo=discord\&logoColor=white)](https://www.youtube.com)
+  [![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge\&logo=discord\&logoColor=white)](https://discord.gg/6h28MNTXTS)
 
 </div>
 

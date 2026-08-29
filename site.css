@@ -39,11 +39,7 @@ body {
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  padding-top: 64px;
-  transition: padding-top 0.28s ease;
 }
-
-body.header-hidden { padding-top: 0; }
 
 .wrap {
   max-width: var(--wrap);
@@ -80,55 +76,12 @@ button:focus-visible {
 /* ---------- Header ---------- */
 
 .site-header {
-  position: fixed;
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
   z-index: 50;
   background: rgba(22, 22, 22, 0.86);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
-  transform: translateY(0);
-  transition: transform 0.28s ease;
-}
-
-.site-header.is-hidden {
-  transform: translateY(-100%);
-}
-
-/* ---------- Header show/hide toggle ---------- */
-/* A small tab attached to the header's bottom edge (or the very top of the
-   viewport when the header is hidden) — reads as part of the header rather
-   than a floating, disconnected control. */
-
-.header-toggle {
-  position: fixed;
-  top: 0;
-  left: 50%;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 20px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 10px 10px;
-  color: var(--fog);
-  cursor: pointer;
-  transform: translateX(-50%);
-  transition: top 0.28s ease, color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.header-toggle:hover { color: var(--ink); border-color: var(--ink-dim); }
-.header-toggle:active { background: var(--panel-2); }
-
-body:not(.header-hidden) .header-toggle { top: 64px; }
-
-.header-toggle-icon { font-size: 0.7rem; line-height: 1; }
-
-@media (max-width: 760px) {
-  body:not(.header-hidden) .header-toggle { top: 65px; }
 }
 
 .header-row {

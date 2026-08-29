@@ -4,27 +4,6 @@
 (function () {
   "use strict";
 
-  // ---- Header show/hide toggle (hidden by default on load) ----
-  var headerToggle = document.getElementById("header-toggle");
-  var header = document.getElementById("site-header");
-  var toggleIcon = headerToggle ? headerToggle.querySelector(".header-toggle-icon") : null;
-
-  function setHeaderHidden(hidden) {
-    document.body.classList.toggle("header-hidden", hidden);
-    header.classList.toggle("is-hidden", hidden);
-    headerToggle.setAttribute("aria-expanded", String(!hidden));
-    headerToggle.setAttribute("aria-label", hidden ? "Show navigation" : "Hide navigation");
-    if (toggleIcon) toggleIcon.textContent = hidden ? "⌄" : "⌃";
-  }
-
-  if (headerToggle && header) {
-    setHeaderHidden(true); // hidden by default
-    headerToggle.addEventListener("click", function () {
-      var currentlyHidden = header.classList.contains("is-hidden");
-      setHeaderHidden(!currentlyHidden);
-    });
-  }
-
   // ---- Mobile nav toggle ----
   var toggle = document.querySelector(".nav-toggle");
   var mobileNav = document.getElementById("mobile-nav");

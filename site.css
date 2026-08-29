@@ -140,6 +140,7 @@ button:focus-visible {
   border-top: 1px solid var(--border);
   padding: 8px 24px 16px;
 }
+.mobile-nav[hidden] { display: none; }
 .mobile-nav a {
   padding: 12px 0;
   text-decoration: none;

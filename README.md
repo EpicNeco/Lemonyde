@@ -4,16 +4,14 @@
 
 </div>
 
-# 🍹🍋 Lemonyde (Rust edition)
+# 🍹🍋 Lemonyde 
 An unofficial, community-made **bootstrapper for Sober** — the [VinegarHQ](https://sober.vinegarhq.org)
 flatpak that runs Roblox on Linux. Lemonyde gives Sober a native GTK4 +
 libadwaita GUI for the stuff you'd otherwise do by hand in a terminal or
 text editor: installing/updating/launching Sober, editing FastFlags
 (FFlags), and tweaking its wrapper settings.
 
-This is a full Rust rewrite of the original Python prototype — same feature
-set, compiled to a native binary, dark-grey-and-yellow theme, and the lemon
-logo installed as the app's icon.
+keep in mind : **LEMONYDE IS IN DEVELOPMENT SO EXPECT CHANGES!**
 
 **Not affiliated with Roblox Corporation or VinegarHQ.** Sober itself stays
 exactly as VinegarHQ ships it — Lemonyde only edits Sober's own config files
@@ -62,13 +60,8 @@ and calls `flatpak` on your behalf.
   and edit `touch_mode`, all stored at the root of `config.json`.
 - **Advanced tools** — open the config/data folders, clear the asset overlay,
   and do a full FFlag/config reset (mirrors VinegarHQ's official reset steps).
-- **Dark grey + yellow GTK4/libadwaita UI**, with a yellow-to-green gradient
-  "Lemonyde" wordmark plus the same gradient style used for section headers
-  throughout (Presets, Active FastFlags, Cursor, Multi-Instance Launch, and
-  more) — all rendered as SVG, since GTK's CSS engine can't gradient-fill
-  text directly — and the app's lemon logo used as the installed app icon
-  (shows up in your app menu / taskbar / alt-tab).
-
+- **And many more.**
+  
 ## Requirements
 
 To **build**:
@@ -101,40 +94,6 @@ packages and to add the Flathub remote, but never runs `sudo` without asking.
 ```bash
 cargo run --release
 ```
-
-## Sharing with friends: build a portable AppImage
-
-If you want to hand a friend a single file instead of the source tree:
-
-```bash
-chmod +x build-appimage.sh
-./build-appimage.sh
-```
-
-This builds the release binary, then uses `linuxdeploy` + `appimagetool`
-(downloaded automatically on first run from their official GitHub releases)
-to bundle GTK4, libadwaita, and their dependencies into one self-contained
-`Lemonyde-x86_64.AppImage`. That's the only file you need to send — your
-friend just does:
-
-```bash
-chmod +x Lemonyde-x86_64.AppImage
-./Lemonyde-x86_64.AppImage
-```
-
-No Rust, no `cargo build`, no GTK dev headers on their end. Flatpak still
-needs to be installed on *their* system for the actual Sober install/launch
-buttons to work (Lemonyde will tell them if it's missing), but that's a
-one-time OS-level thing most Linux desktops already have.
-
-A couple of caveats worth knowing:
-- Build the AppImage on a mainstream, slightly older distro (Ubuntu 22.04/24.04
-  work well) rather than a bleeding-edge rolling release — AppImages are
-  forward-compatible with newer glibc, not backward-compatible with older.
-- The bundling step (`--plugin gtk`) pulls in GTK's icon loaders and theming
-  so the app looks right on other machines, but very unusual desktop setups
-  can still surface small theming quirks — that's normal for any AppImage'd
-  GTK app, not specific to Lemonyde.
 
 ## A note on the build
 

@@ -103,11 +103,6 @@ If you want to move to a newer gtk4-rs release later, bump all four together
 — they're versioned as a set, and mixing versions across them is the most
 common cause of build errors in gtk4-rs projects.
 
-**If `cargo build` fails for you**, please paste me the error — this was
-hand-verified but not compiled end-to-end in the environment it was written
-in (which was stuck on an old Rust toolchain that predates some of gtk4-rs's
-current dependencies), so there's a real chance of a small fix needed for
-your exact toolchain/crate versions.
 
 ## About Sober's first-run wizard
 

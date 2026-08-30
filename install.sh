@@ -74,6 +74,7 @@ echo "Building Lemonyde (release, this can take a couple of minutes)…"
 echo "Installing Lemonyde to ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}/assets" "${BIN_DIR}" "${DESKTOP_DIR}" "${ICON_DIR}"
 cp "${SRC_DIR}/target/release/lemonyde" "${INSTALL_DIR}/lemonyde-bin"
+cp "${SRC_DIR}/style.css" "${INSTALL_DIR}/style.css"
 cp -r "${SRC_DIR}/assets/." "${INSTALL_DIR}/assets/"
 cp "${SRC_DIR}/assets/lemonyde.svg" "${ICON_DIR}/lemonyde.svg"
 

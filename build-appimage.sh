@@ -53,6 +53,7 @@ rm -rf "${APPDIR}"
 mkdir -p "${APPDIR}/usr/bin" "${APPDIR}/usr/share/applications" "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
 
 cp "${ROOT}/target/release/lemonyde" "${APPDIR}/usr/bin/lemonyde"
+cp "${ROOT}/style.css" "${APPDIR}/usr/bin/style.css"
 mkdir -p "${APPDIR}/usr/bin/assets"
 cp -r "${ROOT}/assets/." "${APPDIR}/usr/bin/assets/"
 cp "${ROOT}/assets/lemonyde.svg" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/lemonyde.svg"

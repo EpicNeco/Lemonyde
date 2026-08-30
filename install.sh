@@ -68,7 +68,7 @@ fi
 
 # 4. Build
 echo "Building Lemonyde (release, this can take a couple of minutes)…"
-(cd "${SRC_DIR}" && cargo build --release)
+(cd "${SRC_DIR}" && env -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS cargo build --release)
 
 # 5. Install files
 echo "Installing Lemonyde to ${INSTALL_DIR}"

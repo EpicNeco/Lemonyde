@@ -26,7 +26,7 @@ pkg-config --exists gtk4 || { c_red "GTK4 dev headers not found — run ./instal
 
 # 1. Build the release binary
 echo "Building release binary…"
-(cd "${ROOT}" && cargo build --release)
+(cd "${ROOT}" && env -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS cargo build --release)
 
 # 2. Fetch packaging tools (once)
 mkdir -p "${TOOLS_DIR}"

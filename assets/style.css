@@ -1,0 +1,142 @@
+/* Lemonyde — Bloxstrap-style layout (persistent left sidebar, Fluent-ish
+   structure/spacing) with Lemonyde's own original color identity: dark grey
+   background, yellow text, yellow-green gradient accents — not Bloxstrap's
+   own light/purple palette. */
+
+@define-color lemonyde_bg #1e1e1e;
+@define-color lemonyde_sidebar_bg #171717;
+@define-color lemonyde_bg_alt #262626;
+@define-color lemonyde_card #2b2b2b;
+@define-color lemonyde_border #3a3a3a;
+@define-color lemonyde_yellow #ffd400;
+@define-color lemonyde_yellow_dim #d4b400;
+@define-color lemonyde_yellow_tint alpha(#ffd400, 0.14);
+
+window.lemonyde-window {
+  background-color: @lemonyde_bg;
+  color: @lemonyde_yellow;
+}
+
+/* ---- Header bars: slim, blend into their pane rather than standing out ---- */
+headerbar.sidebar-header,
+headerbar.content-header {
+  background-color: transparent;
+  color: @lemonyde_yellow;
+  box-shadow: inset 0 -1px 0 @lemonyde_border;
+  min-height: 46px;
+}
+headerbar.sidebar-header windowtitle title {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: @lemonyde_yellow;
+}
+
+/* ---- Sidebar (Fluent NavigationView-style pane) ---- */
+.sidebar-box {
+  background-color: @lemonyde_sidebar_bg;
+  border-right: 1px solid @lemonyde_border;
+  padding: 6px;
+}
+
+list.sidebar-list {
+  background: transparent;
+}
+list.sidebar-list row {
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  margin: 2px 6px;
+  padding: 0;
+}
+list.sidebar-list row:hover {
+  background-color: alpha(@lemonyde_yellow, 0.08);
+}
+list.sidebar-list row:selected {
+  background-color: @lemonyde_yellow_tint;
+}
+list.sidebar-list row:selected .sidebar-row image,
+list.sidebar-list row:selected .sidebar-row label {
+  color: @lemonyde_yellow;
+  font-weight: 600;
+}
+
+.sidebar-row {
+  padding: 9px 10px;
+}
+.sidebar-row image { color: @lemonyde_yellow_dim; -gtk-icon-size: 18px; }
+.sidebar-row label { color: @lemonyde_yellow; font-size: 0.92rem; }
+
+/* ---- Cards / rows / lists ---- */
+preferencesgroup > box > listbox,
+row,
+.lemonyde-card {
+  background-color: @lemonyde_card;
+  color: @lemonyde_yellow;
+  border-radius: 8px;
+  border: 1px solid @lemonyde_border;
+}
+
+label, .title, .heading, .caption { color: @lemonyde_yellow; }
+.dim-label { color: @lemonyde_yellow_dim; opacity: 1; }
+
+entry, textview, textview text {
+  background-color: @lemonyde_bg_alt;
+  color: @lemonyde_yellow;
+  caret-color: @lemonyde_yellow;
+}
+
+/* ---- Buttons ---- */
+button { color: @lemonyde_yellow; }
+
+button.suggested-action {
+  background-color: @lemonyde_yellow;
+  color: #1e1e1e;
+  border: none;
+}
+button.suggested-action:hover { background-color: #ffe14d; }
+button.suggested-action label { color: #1e1e1e; }
+
+button.destructive-action {
+  border: 1px solid #cc4444;
+  color: #ff6b6b;
+  background: transparent;
+}
+
+button.pill {
+  padding-left: 18px;
+  padding-right: 18px;
+  border-radius: 999px;
+}
+
+/* ---- Misc ---- */
+banner {
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.lemonyde-logo-frame {
+  padding: 16px;
+  border-radius: 16px;
+  background-color: @lemonyde_card;
+  border: 1px solid @lemonyde_border;
+}
+
+.lemonyde-log {
+  background-color: #141414;
+  color: @lemonyde_yellow;
+  padding: 8px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+flowbox button {
+  background-color: @lemonyde_bg_alt;
+  border: 1px solid @lemonyde_border;
+  border-radius: 8px;
+  color: @lemonyde_yellow;
+}
+flowbox button:hover {
+  background-color: @lemonyde_card;
+  border-color: @lemonyde_yellow;
+}
+flowbox > flowboxchild { padding: 2px; }

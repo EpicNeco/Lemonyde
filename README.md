@@ -3,7 +3,6 @@
 <div align="center">
 
   [![Discord](https://img.shields.io/discord/1541849281298829353?logo=discord&logoColor=white&label=discord&color=4d3dff)](https://discord.gg/6h28MNTXTS)
-  [!Downloads](https://img.shields.io/github/downloads/epicneco/Lemonyde/total)
 
 </div>
 

@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Lemonyde bootstrapper installer (Rust edition).
-# Builds Lemonyde from source, makes sure Flatpak + Flathub are set up,
-# and installs the app + its lemon logo as your icon theme's app icon.
-# Never runs sudo without telling you first.
+
 
 set -euo pipefail
 
@@ -16,7 +13,7 @@ c_green() { printf '\033[1;32m%s\033[0m\n' "$1"; }
 c_yellow() { printf '\033[1;33m%s\033[0m\n' "$1"; }
 c_red() { printf '\033[1;31m%s\033[0m\n' "$1"; }
 
-echo "🍋 Lemonyde bootstrapper (Rust)"
+echo "🍋 Lemonyde bootstrapper"
 echo "--------------------------------"
 
 # 1. Rust toolchain

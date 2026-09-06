@@ -32,14 +32,18 @@
       <a href="#features">Features</a>
       <a href="#honesty">Know the limits</a>
       <a href="#install">Install</a>
-      <a href="https://discord.gg/6h28MNTXTS">Discord</a>
       <a href="https://github.com/EpicNeco/Lemonyde" class="nav-cta">GitHub</a>
     </nav>
     <button class="nav-toggle" aria-expanded="false" aria-controls="mobile-nav" aria-label="Toggle menu">
       <span></span><span></span><span></span>
     </button>
   </div>
-
+  <nav id="mobile-nav" class="mobile-nav" aria-label="Mobile" hidden>
+    <a href="#features">Features</a>
+    <a href="#honesty">Know the limits</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/EpicNeco/Lemonyde">GitHub</a>
+  </nav>
 </header>
 
 <main id="main">
@@ -168,26 +172,18 @@
 
       <div class="install-grid">
         <div class="install-card">
-          <h3>Script (recommended)</h3>
-          <p>Builds from source, checks for GTK4/libadwaita headers, and sets up a desktop entry.</p>
-          <pre class="code-block"><code>git clone https://github.com/EpicNeco/Lemonyde
-cd Lemonyde
+          <h3>Github Release (recommended)</h3>
+          <p>one install and it will run (probably idk).</p>
+          <pre class="code-block"><code>https://github.com/EpicNeco/Lemonyde/releases/latest</code></pre>
+        </div>
+
+        <div class="install-card">
+          <h3>Build from source</h3>
+          <p>not sure if its safe? build it from scratch.</p>
+          <pre class="code-block"><code>git clone https://github.com/epicneco/Lemonyde
+cd lemonyde
 chmod +x install.sh
 ./install.sh</code></pre>
-        </div>
-
-        <div class="install-card">
-          <h3>Run without installing</h3>
-          <p>For trying it out.</p>
-          <pre class="code-block"><code>cargo run --release</code></pre>
-        </div>
-
-        <div class="install-card">
-          <h3>Portable AppImage</h3>
-          <p>One file, no Rust or dev headers needed on the machine that runs it.</p>
-          <pre class="code-block"><code>chmod +x build-appimage.sh
-./build-appimage.sh
-# → Lemonyde-x86_64.AppImage</code></pre>
         </div>
       </div>
 
@@ -205,7 +201,7 @@ chmod +x install.sh
       <img src="assets/lemonyde.svg" alt="" width="22" height="22">
       <span>Lemonyde</span>
     </div>
-    <p class="footer-line">MIT licensed. An independent project, not affiliated with Roblox
+    <p class="footer-line">GPL-3.0 licensed. An independent project, not affiliated with Roblox
       Corporation or VinegarHQ.</p>
     <div class="footer-links">
       <a href="https://github.com/EpicNeco/Lemonyde">Source</a>

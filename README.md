@@ -2,7 +2,7 @@
 
 <div align="center">
 
-  [![Discord](https://img.shields.io/discord/1541849281298829353?logo=discord&logoColor=white&label=discord&color=4d3dff)](https://discord.gg/jt6Y6QdbB2)
+  [![Discord](https://img.shields.io/discord/1541849281298829353?logo=discord&logoColor=white&label=discord&color=4d3dff)](https://dc.gg/lemonyde)
 
 </div>
 

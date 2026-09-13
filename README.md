@@ -1,4 +1,6 @@
-<img width="850" height="423" alt="githubbanner" src="https://github.com/user-attachments/assets/121751f1-c4ed-4236-ad62-5d8b79254a02" />
+<div align="center">
+  
+<img width="400" height="400" alt="lemonyde-logo" src="/assets/lemonyde.svg" />
 
 <div align="center">
 

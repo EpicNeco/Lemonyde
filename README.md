@@ -2,6 +2,8 @@
   
 <img width="400" height="400" alt="lemonyde-logo" src="/assets/lemonyde.svg" />
 
+</div>
+
 <div align="center">
 
   [![Discord](https://img.shields.io/discord/1541849281298829353?logo=discord&logoColor=white&label=discord&color=4d3dff)](https://dc.gg/lemonyde)

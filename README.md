@@ -1,6 +1,6 @@
 <div align="center">
   
-<img width="400" height="400" alt="lemonyde-logo" src="/assets/lemonydetitlealt.svg" />
+<img width="800" height="800" alt="lemonyde-logo" src="/assets/lemonydetitlealt.svg" />
 
 </div>
 

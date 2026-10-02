@@ -1,0 +1,3 @@
+{
+  "buildCommand": "cargo build --release"
+}

@@ -1,672 +1,117 @@
-<!DOCTYPE html>
-<!-- saved from url=(0034)https://epicneco.github.io/ratium/ -->
-<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lemonyde — an unofficial bootstrapper for Sober</title>
+<meta name="description" content="Lemonyde is a community-made bootstrapper for Sober, the VinegarHQ flatpak that runs Roblox on Linux. Install, update, launch, edit FastFlags, and customize your cursor from one native GTK4 app.">
 
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MANGOWARE :: Picklejar</title>
-<link href="./index_files/css2" rel="stylesheet">
-<link rel="icon" type"image" href=assets/ratium.webp>
-<style>
-  :root {
-    --bg: #0b0b0e;
-    --panel: #141419;
-    --panel-2: #1a1a21;
-    --border: #26262f;
-    --border-soft: #1e1e26;
-    --accent: #a8c94a;
-    --accent-dim: #7d9836;
-    --accent-glow: rgba(168, 201, 74, 0.18);
-    --text: #d6d6dc;
-    --muted: #7a7a85;
-    --pickle: #6b8a3a;
-    --code: #c8d6a8;
-  }
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://github.com/EpicNeco/Lemonyde/raw/main/assets/lemonydetitlealt.svg">
+<meta property="og:title" content="Lemonyde — an unofficial bootstrapper for Sober">
+<meta property="og:description" content="A native GTK4 control panel for Sober">
+<meta property="og:url" content="https://epicneco.github.io/Lemonyde/">
+<meta name="twitter:card" content="summary">
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  html { scroll-behavior: smooth; }
-
-  body {
-    background:
-      radial-gradient(1200px 600px at 15% -10%, #171c11 0%, transparent 55%),
-      radial-gradient(1000px 700px at 110% 120%, #10141a 0%, transparent 55%),
-      var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
-    min-height: 100vh;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  /* ---------- NAV ---------- */
-  nav {
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    gap: 28px;
-    padding: 0 32px;
-    height: 64px;
-    background: rgba(11, 11, 14, 0.82);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 15px;
-    letter-spacing: 1.2px;
-    color: var(--pickle);
-    text-decoration: none;
-  }
-  .logo .mark {
-    width: 22px; height: 22px;
-    border-radius: 5px;
-    background: linear-gradient(135deg, var(--accent), var(--pickle));
-    box-shadow: 0 0 16px var(--accent-glow);
-  }
-  .logo span { color: #4d4d58; }
-
-  .nav-links {
-    display: flex;
-    gap: 4px;
-    margin-left: auto;
-    list-style: none;
-  }
-
-  .nav-links a {
-    display: block;
-    padding: 8px 16px;
-    font-size: 13.5px;
-    color: var(--muted);
-    text-decoration: none;
-    border-radius: 7px;
-    transition: all 0.15s;
-    letter-spacing: 0.2px;
-  }
-  .nav-links a:hover { color: var(--text); background: #191920; }
-  .nav-links a.active { color: var(--accent); background: rgba(168, 201, 74, 0.08); }
-
-  /* ---------- PAGE SYSTEM ---------- */
-  .page { display: none; animation: fade 0.35s ease; }
-  .page.active { display: block; }
-
-  @keyframes fade {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: none; }
-  }
-
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
-
-  /* ---------- HERO ---------- */
-  .hero {
-    padding: 96px 0 72px;
-    text-align: center;
-    position: relative;
-  }
-  .hero .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--accent);
-    padding: 7px 15px;
-    border: 1px solid var(--accent-dim);
-    border-radius: 100px;
-    background: rgba(168, 201, 74, 0.06);
-    margin-bottom: 28px;
-  }
-  .hero .badge .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent);
-    animation: pulse 1.6s infinite;
-  }
-  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
-
-  .hero h1 {
-    font-size: clamp(38px, 6vw, 64px);
-    font-weight: 700;
-    letter-spacing: -1.5px;
-    line-height: 1.05;
-    margin-bottom: 22px;
-    background: linear-gradient(180deg, #ffffff 0%, #9aa88a 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  .hero h1 em {
-    font-style: normal;
-    color: var(--accent);
-    text-shadow: 0 0 40px var(--accent-glow);
-  }
-
-  .hero p.lede {
-    max-width: 620px;
-    margin: 0 auto 36px;
-    font-size: 17px;
-    color: var(--muted);
-    font-weight: 300;
-  }
-
-  .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-
-  .btn {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13.5px;
-    padding: 13px 28px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: linear-gradient(180deg, #212128, #1a1a20);
-    color: var(--text);
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    transition: all 0.15s ease;
-    letter-spacing: 0.4px;
-  }
-  .btn:hover { border-color: var(--accent-dim); color: #eef3e2; }
-  .btn:active { transform: translateY(1px); }
-
-  .btn.primary {
-    background: linear-gradient(180deg, #2c3a18, #1e2810);
-    border-color: var(--accent-dim);
-    color: var(--accent);
-  }
-  .btn.primary:hover {
-    background: linear-gradient(180deg, #3a4d20, #263215);
-    box-shadow: 0 0 24px var(--accent-glow);
-  }
-
-  /* ---------- FEATURE CARDS ---------- */
-  .section-title {
-    font-size: 13px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-family: 'JetBrains Mono', monospace;
-    margin-bottom: 32px;
-    text-align: center;
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 18px;
-    padding-bottom: 90px;
-  }
-
-  .card {
-    background: linear-gradient(180deg, var(--panel), #101015);
-    border: 1px solid var(--border-soft);
-    border-radius: 14px;
-    padding: 28px 26px;
-    transition: all 0.25s ease;
-    position: relative;
-    overflow: hidden;
-  }
-  .card::before {
-    content: "";
-    position: absolute; top: 0; left: 0; right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(168,201,74,.35), transparent);
-    opacity: 0;
-    transition: opacity 0.25s;
-  }
-  .card:hover { transform: translateY(-3px); border-color: #34343f; }
-  .card:hover::before { opacity: 1; }
-
-  .card .ico {
-    width: 40px; height: 40px;
-    border-radius: 10px;
-    display: grid; place-items: center;
-    background: rgba(168,201,74,.08);
-    border: 1px solid rgba(168,201,74,.18);
-    color: var(--accent);
-    margin-bottom: 18px;
-  }
-  .card .ico svg { width: 19px; height: 19px; }
-
-  .card h3 {
-    font-size: 16px;
-    font-weight: 500;
-    margin-bottom: 9px;
-    color: #e8e8ee;
-  }
-  .card p { font-size: 14px; color: var(--muted); font-weight: 300; }
-
-  /* ---------- EXECUTOR PAGE ---------- */
-  .exec-header {
-    padding: 56px 0 32px;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 24px;
-    flex-wrap: wrap;
-    border-bottom: 1px solid var(--border-soft);
-    margin-bottom: 36px;
-  }
-  .exec-header h1 {
-    font-size: 34px;
-    font-weight: 600;
-    letter-spacing: -0.8px;
-    margin-bottom: 8px;
-  }
-  .exec-header p { color: var(--muted); font-size: 14.5px; font-weight: 300; }
-
-  .status-pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11.5px; letter-spacing: 1.5px; text-transform: uppercase;
-    color: var(--accent);
-    padding: 8px 14px;
-    border: 1px solid var(--accent-dim);
-    border-radius: 100px;
-    background: rgba(168,201,74,.06);
-  }
-  .status-pill .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--accent); box-shadow: 0 0 8px var(--accent);
-    animation: pulse 1.6s infinite;
-  }
-
-  .exec-layout {
-    display: grid;
-    grid-template-columns: 1.5fr 1fr;
-    gap: 22px;
-    padding-bottom: 80px;
-  }
-  @media (max-width: 900px) {
-    .exec-layout { grid-template-columns: 1fr; }
-  }
-
-  .exec-window {
-    background: linear-gradient(180deg, var(--panel) 0%, #101015 100%);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    overflow: hidden;
-    box-shadow: 0 24px 70px rgba(0,0,0,.55);
-  }
-
-  .titlebar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px;
-    background: linear-gradient(180deg, #1c1c22, #151519);
-    border-bottom: 1px solid var(--border);
-  }
-  .titlebar .title {
-    color: var(--accent);
-    font-size: 14px; font-weight: 500; letter-spacing: 0.3px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .titlebar .dots { display: flex; gap: 7px; }
-  .titlebar .dots i {
-    width: 11px; height: 11px; border-radius: 50%;
-    display: block;
-  }
-  .titlebar .dots i:nth-child(1) { background: #3a3a44; }
-  .titlebar .dots i:nth-child(2) { background: #3a3a44; }
-  .titlebar .dots i:nth-child(3) { background: var(--accent-dim); }
-
-  .editor {
-    position: relative;
-    background: #0d0d11;
-    min-height: 320px;
-  }
-  .editor .gutter {
-    position: absolute; left: 0; top: 0; bottom: 0;
-    width: 44px;
-    background: #0a0a0d;
-    border-right: 1px solid var(--border);
-    color: #3d3d48;
-    text-align: right;
-    padding: 16px 9px 16px 0;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    line-height: 1.7;
-    user-select: none;
-    overflow: hidden;
-  }
-  .editor textarea {
-    width: 100%;
-    min-height: 320px;
-    background: transparent;
-    border: none;
-    outline: none;
-    resize: vertical;
-    color: var(--code);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    line-height: 1.7;
-    padding: 16px 20px 16px 58px;
-    caret-color: var(--accent);
-  }
-  .editor textarea::selection { background: rgba(168,201,74,.25); }
-  .editor textarea::placeholder { color: #35353f; }
-
-  .actions {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 14px;
-    background: #121217;
-    border-top: 1px solid var(--border);
-  }
-
-  .icon-btns { margin-left: auto; display: flex; gap: 8px; }
-  .icon-btn {
-    width: 38px; height: 38px;
-    display: grid; place-items: center;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: #1a1a20;
-    color: var(--muted);
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .icon-btn:hover { color: var(--accent); border-color: var(--accent-dim); }
-  .icon-btn svg { width: 16px; height: 16px; }
-
-  /* sprite + console column */
-  .exec-side { display: flex; flex-direction: column; gap: 22px; }
-
-  .stage {
-    background:
-      radial-gradient(500px 260px at 50% 0%, rgba(107,138,58,.09), transparent 70%),
-      #0d0d11;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 30px 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  .sprite-frame {
-    width: 210px; height: 210px;
-    display: grid; place-items: center;
-    border: 1px solid #23232b;
-    border-radius: 14px;
-    background: repeating-linear-gradient(45deg, #101015 0 10px, #0e0e13 10px 20px);
-    position: relative;
-    overflow: hidden;
-  }
-  .sprite-frame::after {
-    content: ""; position: absolute; inset: 0;
-    background: radial-gradient(circle at 50% 40%, rgba(168,201,74,.06), transparent 65%);
-    pointer-events: none;
-  }
-  .sprite {
-    width: 160px;
-    image-rendering: pixelated;
-    animation: idle 3s ease-in-out infinite;
-    filter: drop-shadow(0 0 16px rgba(168,201,74,.18));
-  }
-  @keyframes idle {
-    0%,100% { transform: translateY(0) rotate(-1deg); }
-    50%     { transform: translateY(-6px) rotate(1deg); }
-  }
-  .brand {
-    margin-top: 18px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 18px; letter-spacing: 1.5px;
-    color: var(--pickle);
-    text-shadow: 0 0 20px rgba(168,201,74,.25);
-  }
-  .brand span { color: #4d4d58; }
-
-  .console {
-    background: #0a0a0d;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 14px 18px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #5f6b4a;
-    max-height: 180px;
-    overflow-y: auto;
-  }
-  .console .line { padding: 1px 0; }
-  .console .ok { color: var(--accent); }
-  .console .warn { color: #c9a84a; }
-  .console .dim { color: #3f3f48; }
-  .console::-webkit-scrollbar { width: 6px; }
-  .console::-webkit-scrollbar-thumb { background: #2a2a33; border-radius: 3px; }
-
-  /* ---------- FOOTER ---------- */
-  footer {
-    border-top: 1px solid var(--border-soft);
-    padding: 32px 0;
-    text-align: center;
-    color: #4a4a54;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 0.5px;
-  }
-  footer span { color: var(--pickle); }
-</style>
+<link rel="icon" type="image/svg+xml" href="assets/lemonyde.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
 
-<nav>
-  <a class="logo" href="https://epicneco.github.io/ratium/#" data-nav="home">
-    <img src="./index_files/ratium.webp" alt="balls" width="50" height="50">MANGOWARE<span>::</span>Picklejar
-  </a>
-  <ul class="nav-links">
-    <li><a href="https://epicneco.github.io/ratium/#" data-nav="home" class="active">Home</a></li>
-    <li><a href="https://epicneco.github.io/ratium/#" data-nav="executor" class="">Executor</a></li>
-    <li><a href="https://epicneco.github.io/ratium/#" data-nav="docs">Docs</a></li>
-  </ul>
-</nav>
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand" href="#top">
+      <img src="assets/lemonyde.svg" alt="" width="22" height="22">
+      <span>Lemonyde</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="https://dc.gg/lemonyde">Discord</a>
+      <a href="https://github.com/EpicNeco/Lemonyde">GitHub</a>
+    </nav>
+  </div>
+</header>
 
-<!-- ========== HOME ========== -->
-<section class="page active" id="page-home">
-  <div class="wrap">
-    <div class="hero">
-      <div class="badge"><span class="dot"></span>v2.2.8</div>
-      <h1>skid like a dumbass<br> <em>cuz you are</em></h1>
-      <p class="lede">
-        Ratium is the best executor cuz yes also comes with ratted serverside (PickleJar)
-        ratium itself is wip for now you can only use PickleJar
-      </p>
-      <div class="cta-row">
-        <a class="btn primary" href="https://epicneco.github.io/ratium/#" data-nav="executor">Open PickleJar →</a>
-        <a class="btn" href="https://epicneco.github.io/ratium/#" data-nav="docs">Read the Docs</a>
+<main id="main">
+
+  <section class="hero" id="top">
+    <div class="wrap">
+      <img class="wordmark" src="assets/lemonyde-title.svg" alt="Lemonyde" width="320" height="66">
+      <p class="hero-tagline">A native control panel for Sober, the VinegarHQ flatpak that runs
+        Roblox on Linux.</p>
+      <p class="hero-note">Not affiliated with Roblox Corporation or VinegarHQ. Sober stays
+        exactly as VinegarHQ ships it — Lemonyde only edits its config and calls
+        <code>flatpak</code> on your behalf.</p>
+      <div class="hero-actions">
+        <a class="btn" href="https://github.com/EpicNeco/Lemonyde/releases/latest">Get Lemonyde</a>
+        <a class="btn" href="https://github.com/EpicNeco/Lemonyde">Build From Source</a>
       </div>
     </div>
+  </section>
 
-    <div class="section-title">// what it does</div>
-    <div class="grid">
-      <div class="card">
-        <div class="ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-        </div>
-        <h3>127356 rats</h3>
-        <p>your data is being sold to LinusWare</p>
-      </div>
-      <div class="card">
-        <div class="ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
-        </div>
-        <h3>0.3 sunc</h3>
-        <p>can run require scripts (sometimes idk)</p>
-      </div>
-      <div class="card">
-        <div class="ico">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0110 0v4"></path></svg>
-        </div>
-        <h3>opsec</h3>
-        <p>while you are skidding and trolling lil kids your data is being securely kept in .log files that are stored in the MANGOWARE repo</p>
-      </div>
+  <section id="features">
+    <div class="wrap">
+      <h2>What it does</h2>
+      <ul class="plain-list">
+        <li><strong>Home.</strong> Install, update, launch, or uninstall Sober, with isolated
+          multi-instance slots for running more than one account.</li>
+        <li><strong>FFlags.</strong> An editor for flags confirmed to still work on Roblox's
+          allowlist, plus presets.</li>
+        <li><strong>Customize.</strong> Set a cursor from any image — resized and centered to
+          what Roblox expects, so it renders correctly.</li>
+        <li><strong>Settings.</strong> The wrapper options Sober reads from its own config, without
+          a text editor.</li>
+        <li><strong>Advanced.</strong> Open the config/data folders, clear the asset overlay, or
+          reset everything in one click.</li>
+        <li><strong>Built with Rust, GTK4, and libadwaita.</strong> A native binary, not a wrapped
+          web view.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="honesty">
+    <div class="wrap">
+      <h2>What it won't pretend</h2>
+      <ul class="plain-list">
+        <li>FastFlags outside Roblox's allowlist do nothing — Lemonyde only lists ones confirmed
+          to still work.</li>
+        <li>Running multiple instances at once is against Roblox's rules and can risk a flag on
+          your account. Lemonyde warns about this in the app, not just here.</li>
+        <li>The font override is experimental — Sober documents the cursor format but not the
+          exact filename it expects for a font.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Build From Source</h2>
+      <pre class="code-block"><code>git clone https://github.com/EpicNeco/Lemonyde
+cd Lemonyde
+chmod +x install.sh
+./install.sh</code></pre>
+      <p class="install-note">Requires Flatpak with the Flathub remote to install/launch Sober —
+        Lemonyde says so if it's missing. Prefer one portable file instead? Run
+        <code>./build-appimage.sh</code>. Full details in the
+        <a href="https://github.com/EpicNeco/Lemonyde#readme">README</a>.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-row">
+    <p>MIT licensed. An independent project, not affiliated with Roblox Corporation or VinegarHQ.</p>
+    <div class="footer-links">
+      <a href="https://github.com/EpicNeco/Lemonyde/issues">Issues</a>
+      <a href="https://sober.vinegarhq.org/">Sober</a>
     </div>
   </div>
-</section>
-
-<!-- ========== EXECUTOR ========== -->
-<section class="page" id="page-executor">
-  <div class="wrap">
-    <div class="exec-header">
-      <div>
-        <h1>PickleJar serverside</h1>
-        <p>perfect for brookhaven</p>
-      </div>
-      <div class="status-pill"><span class="dot"></span>opsec ready</div>
-    </div>
-
-    <div class="exec-layout">
-      <!-- left: editor window -->
-      <div class="exec-window">
-        <div class="titlebar">
-          <div class="title">Picklejar Serverside</div>
-          <div class="dots"><i></i><i></i><i></i></div>
-        </div>
-
-        <div class="editor">
-          <div class="gutter">1</div>
-          <textarea id="code" spellcheck="false" placeholder="-- Picklejar Lua sandbox --
-print('mangoware loaded')"></textarea>
-        </div>
-
-        <div class="actions">
-          <button class="btn primary" id="run">Execute</button>
-          <button class="btn" id="clear">Clear</button>
-          <div class="icon-btns">
-            <button class="icon-btn" title="Show">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-            </button>
-            <button class="icon-btn" title="Refresh">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path></svg>
-            </button>
-            <button class="icon-btn" title="Restart">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 102.13-9.36L1 10"></path></svg>
-            </button>
-            <button class="icon-btn" title="Kill">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 00-5 5v3H6a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2v-8a2 2 0 00-2-2h-1V7a5 5 0 00-5-5zm-3 8V7a3 3 0 016 0v3H9z"></path></svg>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- right: sprite + console -->
-      <div class="exec-side">
-        <div class="stage">
-          <div class="sprite-frame">
-            <img src="./index_files/ratium.webp" alt="tuff serverside" width="225" height="150">
-          </div>
-          <div class="brand">MANGOWARE<span>::</span>Picklejar</div>
-        </div>
-
-        <div class="console" id="console">
-          <div class="line dim">[boot] initializing sandbox environment...</div>
-          <div class="line ok">[ok] mangoware core injected</div>
-          <div class="line ok">[ok] picklejar lua vm attached</div>
-          <div class="line warn">[warn] waiting for script input...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ========== DOCS ========== -->
-<section class="page" id="page-docs">
-  <div class="wrap">
-    <div class="exec-header">
-      <div>
-        <h1>Docs</h1>
-        <p>tuff and sigma</p>
-      </div>
-    </div>
-    <div class="grid" style="padding-bottom:90px;">
-      <div class="card">
-        <h3>print()</h3>
-        <p>printsploit</p>
-      </div>
-      <div class="card">
-        <h3>require()</h3>
-        <p>leaks the data of the user</p>
-      </div>
-      <div class="card">
-        <h3>loadstring()</h3>
-        <p>execute better rats to win in rivals</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<footer>
-  <span>MANGOWARE</span> :: Picklejar — built with TIKI skid v7 pro
 </footer>
 
-<script>
-  // ---- page router ----
-  const pages = { home: 'page-home', executor: 'page-executor', docs: 'page-docs' };
-  const navLinks = document.querySelectorAll('[data-nav]');
-
-  function go(name) {
-    Object.values(pages).forEach(id => document.getElementById(id).classList.remove('active'));
-    document.getElementById(pages[name]).classList.add('active');
-    document.querySelectorAll('.nav-links a').forEach(a =>
-      a.classList.toggle('active', a.dataset.nav === name));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  navLinks.forEach(el => el.addEventListener('click', e => {
-    e.preventDefault();
-    go(el.dataset.nav);
-  }));
-
-  // ---- executor wiring ----
-  const ta = document.getElementById('code');
-  const gutter = document.querySelector('.editor .gutter');
-  const consoleEl = document.getElementById('console');
-
-  ta.addEventListener('input', () => {
-    const lines = ta.value.split('\n').length;
-    gutter.innerHTML = Array.from({ length: Math.max(lines, 1) }, (_, i) => i + 1).join('<br>');
-  });
-
-  ta.addEventListener('keydown', e => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const s = ta.selectionStart, en = ta.selectionEnd;
-      ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
-      ta.selectionStart = ta.selectionEnd = s + 2;
-    }
-  });
-
-  function log(cls, msg) {
-    const d = document.createElement('div');
-    d.className = 'line ' + cls;
-    d.textContent = msg;
-    consoleEl.appendChild(d);
-    consoleEl.scrollTop = consoleEl.scrollHeight;
-  }
-
-  document.getElementById('run').addEventListener('click', () => {
-    log('dim', '> execute');
-    const src = ta.value.trim();
-    if (!src) { log('warn', '[warn] empty buffer'); return; }
-    log('ok', '[ok] compiling ' + src.length + ' bytes...');
-    setTimeout(() => log('ok', '[ok] script dispatched to picklejar'), 260);
-    setTimeout(() => log('dim', '[vm] result: nil'), 620);
-  });
-
-  document.getElementById('clear').addEventListener('click', () => {
-    ta.value = '';
-    gutter.innerHTML = '1';
-    log('dim', '[clear] buffer wiped');
-  });
-
-  document.querySelectorAll('.icon-btn').forEach(btn =>
-    btn.addEventListener('click', () => log('dim', '[' + btn.title.toLowerCase() + '] invoked')));
-</script>
-
-
-</body></html>
+<script src="assets/site.js"></script>
+</body>
+</html>

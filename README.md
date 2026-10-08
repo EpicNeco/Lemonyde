@@ -85,8 +85,7 @@ install/launch Sober itself.
 ## Install
 
 ```bash
-chmod +x install.sh
-./install.sh
+curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash
 ```
 
 This builds Lemonyde in release mode, copies the binary + your lemon logo to

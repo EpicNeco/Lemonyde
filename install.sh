@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 #
-# Lemonyde installer — works both ways:
+# Lemonyde installer — fully automated, works both ways:
 #   ./install.sh                          # local checkout
 #   curl -fsSL https://raw.githubusercontent.com/epicneco/lemonyde/main/install.sh | bash
+#
+# Plain `curl ... | bash` installs EVERYTHING with zero prompts:
+# git (if a clone is needed), Rust via rustup (if cargo is missing),
+# GTK4/libadwaita dev headers, Flatpak + Flathub, then builds and
+# installs Lemonyde itself plus Sober. The only thing that may still
+# ask for input is sudo asking for YOUR password.
+#
+# Opt out of any step with --no-* flags (see --help).
 #
 set -euo pipefail
 
@@ -21,29 +29,57 @@ BIN_DIR="${LEMONYDE_BIN_DIR:-${HOME}/.local/bin}"
 DESKTOP_DIR="${LEMONYDE_DESKTOP_DIR:-${HOME}/.local/share/applications}"
 ICON_DIR="${LEMONYDE_ICON_DIR:-${HOME}/.local/share/icons/hicolor/scalable/apps}"
 
-ASSUME_YES=0
+# Automation is the default. Every step below runs without asking.
+# Set to 0 via --no-* flags or LEMONYDE_NO_* env vars to skip a step.
+AUTO_DEPS="${LEMONYDE_NO_DEPS:+0}"
+AUTO_DEPS="${AUTO_DEPS:-1}"
+AUTO_RUST="${LEMONYDE_NO_RUST:+0}"
+AUTO_RUST="${AUTO_RUST:-1}"
+AUTO_FLATPAK="${LEMONYDE_NO_FLATPAK:+0}"
+AUTO_FLATPAK="${AUTO_FLATPAK:-1}"
 INSTALL_SOBER_PROMPT=1
+INTERACTIVE=0
 SRC_DIR_OVERRIDE="${LEMONYDE_SRC_DIR:-}"
+
+if [[ -n "${LEMONYDE_NO_SOBER:-}" ]]; then
+  INSTALL_SOBER_PROMPT=0
+fi
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--yes] [--no-sober] [--repo URL] [--ref BRANCH] [--help]
+Usage: install.sh [options]
 
-  --yes, -y      Assume "yes" to all prompts (non-interactive / curl-pipe friendly)
-  --no-sober    Don't offer to install Sober via Flatpak at the end
-  --repo URL    Git repo to clone when no local checkout is found
-  --ref REF     Branch/tag to clone (default: repo default branch)
-  --help, -h    Show this help
+Fully automated by default — just run it, no flags needed.
+  curl -fsSL https://raw.githubusercontent.com/epicneco/lemonyde/main/install.sh | bash
+
+Options:
+  -y, --yes        Accepted for backwards compatibility (automation is now
+                   the default, so this is a no-op)
+  -i, --interactive
+                   Ask before each install step instead of just doing it
+  --no-sober       Don't install Sober via Flatpak at the end
+  --no-deps        Don't auto-install GTK4/libadwaita dev packages (fail if missing)
+  --no-rust        Don't auto-install Rust via rustup (fail if cargo missing)
+  --no-flatpak     Don't auto-install Flatpak (Sober install will be skipped)
+  --repo URL       Git repo to clone when no local checkout is found
+  --ref REF        Branch/tag to clone (default: repo default branch)
+  -h, --help       Show this help
 Env:
   LEMONYDE_REPO, LEMONYDE_REF, LEMONYDE_SRC_DIR, LEMONYDE_INSTALL_DIR,
-  LEMONYDE_BIN_DIR, LEMONYDE_DESKTOP_DIR, LEMONYDE_ICON_DIR
+  LEMONYDE_BIN_DIR, LEMONYDE_DESKTOP_DIR, LEMONYDE_ICON_DIR,
+  LEMONYDE_NO_SOBER=1, LEMONYDE_NO_DEPS=1, LEMONYDE_NO_RUST=1,
+  LEMONYDE_NO_FLATPAK=1
 USAGE
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -y|--yes) ASSUME_YES=1; shift ;;
+    -y|--yes) shift ;; # no-op: automation is default since v2
+    -i|--interactive) INTERACTIVE=1; shift ;;
     --no-sober) INSTALL_SOBER_PROMPT=0; shift ;;
+    --no-deps) AUTO_DEPS=0; shift ;;
+    --no-rust) AUTO_RUST=0; shift ;;
+    --no-flatpak) AUTO_FLATPAK=0; shift ;;
     --repo) REPO_URL="${2:?--repo needs a URL}"; shift 2 ;;
     --ref) REF="${2:?--ref needs a value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -55,27 +91,26 @@ done
 
 c_green() { printf '\033[1;32m%s\033[0m\n' "$1"; }
 c_yellow() { printf '\033[1;33m%s\033[0m\n' "$1"; }
+c_blue() { printf '\033[1;34m%s\033[0m\n' "$1"; }
 c_red() { printf '\033[1;31m%s\033[0m\n' "$1" >&2; }
 die() { c_red "$1"; exit "${2:-1}"; }
+info() { printf '%s\n' "$1"; }
 
-# ask "prompt" [default] -> returns 0 for yes, 1 for no.
-# Never reads from stdin (stdin is the script itself when piped via curl);
-# reads from /dev/tty when available, otherwise defaults to No
-# (or Yes when --yes was given, handled above).
+# ask "prompt" -> returns 0 for yes, 1 for no.
+# In default (automated) mode this always says yes without prompting.
+# With --interactive it asks on /dev/tty (never stdin, which is the
+# script itself when piped via curl); without a tty it defaults to No.
 ask() {
   local prompt="$1" def="${2:-N}" reply=""
-  if [[ "${ASSUME_YES}" == "1" ]]; then
+  if [[ "${INTERACTIVE}" != "1" ]]; then
     return 0
   fi
-  # Try to talk to the controlling terminal. The group redirect silences
-  # "No such device or address" when there is no tty (e.g. CI / curl | bash).
   if { exec 3<>/dev/tty; } 2>/dev/null; then
     printf '%s [y/N] ' "${prompt}" >&3 || true
     IFS= read -r reply <&3 || reply="${def}"
     exec 3>&- 3<&- || true
     [[ "${reply:-$def}" =~ ^[Yy]$ ]]
   else
-    # Non-interactive (e.g. `curl ... | bash` without --yes): default to No.
     return 1
   fi
 }
@@ -84,13 +119,195 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# Privilege escalation: empty when root, "sudo" otherwise.
+SUDO=""
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  SUDO=""
+elif need_cmd sudo; then
+  SUDO="sudo"
+else
+  c_yellow "Warning: not running as root and 'sudo' not found — system package installs will fail."
+  c_yellow "Re-run as root or install sudo, or install dependencies manually (see --help output on failure)."
+fi
+
 sed_escape_replacement() {
   # Escape \, &, and | (our sed delimiter) for use in a replacement string.
   printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
-echo "🍋 Lemonyde bootstrapper"
-echo "--------------------------------"
+# Print the detected package manager: apt, dnf, yum, pacman, zypper, apk, xbps, eopkg, or "".
+detect_pkg_mgr() {
+  if need_cmd apt-get; then echo "apt";
+  elif need_cmd dnf; then echo "dnf";
+  elif need_cmd yum; then echo "yum";
+  elif need_cmd pacman; then echo "pacman";
+  elif need_cmd zypper; then echo "zypper";
+  elif need_cmd apk; then echo "apk";
+  elif need_cmd xbps-install; then echo "xbps";
+  elif need_cmd eopkg; then echo "eopkg";
+  else echo "";
+  fi
+}
+
+# pkg_install pkg1 pkg2 ... — install system packages with the detected manager.
+# Returns 0 on success, 1 when no supported manager was found.
+pkg_install() {
+  local mgr
+  mgr="$(detect_pkg_mgr)"
+  case "${mgr}" in
+    apt)
+      ${SUDO:+$SUDO }apt-get update && ${SUDO:+$SUDO }apt-get install -y "$@"
+      ;;
+    dnf)
+      ${SUDO:+$SUDO }dnf install -y "$@"
+      ;;
+    yum)
+      ${SUDO:+$SUDO }yum install -y "$@"
+      ;;
+    pacman)
+      ${SUDO:+$SUDO }pacman -S --needed --noconfirm "$@"
+      ;;
+    zypper)
+      ${SUDO:+$SUDO }zypper install -y "$@"
+      ;;
+    apk)
+      ${SUDO:+$SUDO }apk add "$@"
+      ;;
+    xbps)
+      ${SUDO:+$SUDO }xbps-install -Sy "$@"
+      ;;
+    eopkg)
+      ${SUDO:+$SUDO }eopkg install -y "$@"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+print_manual_deps() {
+  echo "Install them for your distro, then re-run this script (or re-run with automation):"
+  echo
+  echo "  Debian/Ubuntu:  sudo apt-get install libgtk-4-dev libadwaita-1-dev build-essential pkg-config curl git flatpak"
+  echo "  Fedora/RHEL:    sudo dnf install gtk4-devel libadwaita-devel gcc gcc-c++ make pkg-config curl git flatpak"
+  echo "  Arch/CachyOS:   sudo pacman -S --needed gtk4 libadwaita base-devel pkg-config curl git flatpak"
+  echo "  openSUSE:       sudo zypper install gtk4-devel libadwaita-devel patterns-devel-base-devel_basis pkg-config curl git flatpak"
+  echo "  Alpine:         sudo apk add gtk4.0-dev libadwaita-dev build-base pkgconfig curl git flatpak"
+  echo "  Void:           sudo xbps-install -Sy gtk4-devel libadwaita-devel base-devel pkg-config curl git flatpak"
+  echo
+}
+
+# Deps per manager. Args: kind ("dev" | "git" | "curl" | "flatpak").
+# Prints a space-separated package list, or "" when the manager is unknown.
+deps_for() {
+  local kind="$1" mgr="$2"
+  case "${mgr}" in
+    apt)
+      case "${kind}" in
+        dev) echo "libgtk-4-dev libadwaita-1-dev build-essential pkg-config" ;;
+        git) echo "git" ;;
+        curl) echo "curl ca-certificates" ;;
+        flatpak) echo "flatpak" ;;
+      esac
+      ;;
+    dnf|yum)
+      case "${kind}" in
+        dev) echo "gtk4-devel libadwaita-devel gcc gcc-c++ make pkg-config" ;;
+        git) echo "git" ;;
+        curl) echo "curl ca-certificates" ;;
+        flatpak) echo "flatpak" ;;
+      esac
+      ;;
+    pacman)
+      case "${kind}" in
+        dev) echo "gtk4 libadwaita base-devel pkg-config" ;;
+        git) echo "git" ;;
+        curl) echo "curl ca-certificates" ;;
+        flatpak) echo "flatpak" ;;
+      esac
+      ;;
+    zypper)
+      case "${kind}" in
+        dev) echo "gtk4-devel libadwaita-devel patterns-devel-base-devel_basis pkg-config" ;;
+        git) echo "git" ;;
+        curl) echo "curl ca-certificates" ;;
+        flatpak) echo "flatpak" ;;
+      esac
+      ;;
+    apk)
+      case "${kind}" in
+        dev) echo "gtk4.0-dev libadwaita-dev build-base pkgconfig" ;;
+        git) echo "git" ;;
+        curl) echo "curl ca-certificates" ;;
+        flatpak) echo "flatpak" ;;
+      esac
+      ;;
+    xbps)
+      case "${kind}" in
+        dev) echo "gtk4-devel libadwaita-devel base-devel pkg-config" ;;
+        git) echo "git" ;;
+        curl) echo "curl ca-certificates" ;;
+        flatpak) echo "flatpak" ;;
+      esac
+      ;;
+    eopkg)
+      case "${kind}" in
+        dev) echo "libgtk-4-devel libadwaita-devel system.devel pkg-config" ;;
+        git) echo "git" ;;
+        curl) echo "curl ca-certificates" ;;
+        flatpak) echo "flatpak" ;;
+      esac
+      ;;
+  esac
+}
+
+# ensure_pkg kind description — make sure a system dependency class is
+# installed, auto-installing it. Dies when automation is disabled (via
+# --no-* flags) or when the install fails. For FATAL dependencies only;
+# Flatpak uses try_install_pkg below so a failure only warns.
+ensure_pkg() {
+  local kind="$1" desc="$2" mgr pkgs
+  mgr="$(detect_pkg_mgr)"
+  # shellcheck disable=SC2206: intentional word splitting of package list
+  pkgs=($(deps_for "${kind}" "${mgr}"))
+  if [[ "${#pkgs[@]}" -eq 0 ]]; then
+    die "Unrecognized package manager — please install ${desc} manually, then re-run."
+  fi
+  if [[ "${INTERACTIVE}" == "1" ]]; then
+    ask "Install ${desc} now (${pkgs[*]})?" || die "Cannot continue without ${desc}."
+  else
+    c_blue "→ Installing ${desc} (${pkgs[*]})…"
+  fi
+  pkg_install "${pkgs[@]}" || die "Failed to install ${desc}. Try manually, then re-run."
+}
+
+# try_install_pkg kind description — best-effort variant of ensure_pkg.
+# Returns 0 on success, 1 on failure/decline, but NEVER exits the script.
+# Used for Flatpak, where Lemonyde is still usable without it.
+try_install_pkg() {
+  local kind="$1" desc="$2" mgr pkgs
+  mgr="$(detect_pkg_mgr)"
+  # shellcheck disable=SC2206: intentional word splitting of package list
+  pkgs=($(deps_for "${kind}" "${mgr}"))
+  if [[ "${#pkgs[@]}" -eq 0 ]]; then
+    c_yellow "Warning: unrecognized package manager — install ${desc} manually; see https://flatpak.org/setup/."
+    return 1
+  fi
+  if [[ "${INTERACTIVE}" == "1" ]]; then
+    ask "Install ${desc} now (${pkgs[*]})?" || { c_yellow "Skipping ${desc} install."; return 1; }
+  else
+    c_blue "→ Installing ${desc} (${pkgs[*]})…"
+  fi
+  if pkg_install "${pkgs[@]}"; then
+    return 0
+  else
+    c_yellow "Warning: could not install ${desc}."
+    return 1
+  fi
+}
+
+echo "🍋 Lemonyde bootstrapper (fully automated)"
+echo "------------------------------------------"
 
 # 0. Resolve sources: prefer a local checkout, otherwise clone.
 SRC_DIR=""
@@ -117,7 +334,15 @@ else
     if [[ -z "${REPO_URL}" ]]; then
       die "No local sources found and no repo URL configured. Set --repo or LEMONYDE_REPO."
     fi
-    need_cmd git || die "git not found, but it is needed to download Lemonyde. Install git and re-run, or clone ${REPO_URL} manually."
+    if ! need_cmd git; then
+      if [[ "${AUTO_DEPS}" == "1" ]]; then
+        c_yellow "git not found — installing it automatically…"
+        ensure_pkg git "git"
+      else
+        die "git not found (needed to download Lemonyde). Install git and re-run, or clone ${REPO_URL} manually. (--no-deps disables auto-install)"
+      fi
+    fi
+    need_cmd git || die "git still not found after install attempt."
     WORKDIR="$(mktemp -d -t lemonyde-install.XXXXXX)"
     echo "No local sources detected — cloning ${REPO_URL}…"
     if [[ -n "${REF}" ]]; then
@@ -132,62 +357,82 @@ fi
 [[ -f "${SRC_DIR}/Cargo.toml" ]] || die "Cargo.toml not found in ${SRC_DIR} (repo layout unexpected)."
 [[ -f "${SRC_DIR}/lemonyde.desktop" ]] || die "lemonyde.desktop not found in ${SRC_DIR}."
 
-# 1. Rust toolchain
-need_cmd cargo || die "cargo/rustc not found. Install Rust first: https://rustup.rs"
+# 1. Rust toolchain — auto-install via rustup when cargo is missing.
+if ! need_cmd cargo; then
+  if [[ "${AUTO_RUST}" != "1" ]]; then
+    die "cargo/rustc not found. Install Rust first: https://rustup.rs (or re-run without --no-rust to auto-install via rustup)."
+  fi
+  c_yellow "Rust toolchain not found — installing automatically via rustup…"
+  if ! need_cmd curl; then
+    if need_cmd wget; then
+      c_yellow "curl not found, using wget to fetch rustup…"
+    else
+      c_yellow "curl not found — installing it first…"
+      ensure_pkg curl "curl"
+    fi
+  fi
+  if need_cmd curl; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+  elif need_cmd wget; then
+    wget -qO- https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+  else
+    die "Neither curl nor wget is available to fetch rustup. Install one and re-run."
+  fi
+  # Pick up cargo for the rest of this script run.
+  export PATH="${HOME}/.cargo/bin:${PATH}"
+  if [[ -f "${HOME}/.cargo/env" ]]; then
+    # shellcheck disable=SC1091
+    . "${HOME}/.cargo/env" || true
+  fi
+  need_cmd cargo || die "rustup install finished but cargo is still not on PATH. Add \$HOME/.cargo/bin to PATH and re-run."
+  c_green "Rust installed: $(cargo --version)"
+else
+  info "Found $(cargo --version 2>/dev/null || echo cargo)."
+fi
 
-# 2. GTK4 / libadwaita dev headers (needed to build)
+# 2. GTK4 / libadwaita dev headers (needed to build) — auto-install.
 missing_pkgs=()
 if need_cmd pkg-config; then
   pkg-config --exists gtk4 2>/dev/null || missing_pkgs+=("gtk4")
   pkg-config --exists libadwaita-1 2>/dev/null || missing_pkgs+=("libadwaita-1")
 else
-  missing_pkgs+=("gtk4" "libadwaita-1")
+  missing_pkgs+=("pkg-config" "gtk4" "libadwaita-1")
 fi
 
 if [[ "${#missing_pkgs[@]}" -gt 0 ]]; then
-  c_yellow "Missing dev packages: ${missing_pkgs[*]}"
-  echo "Install them for your distro, then re-run this script:"
-  echo
-  echo "  Debian/Ubuntu:  sudo apt-get install libgtk-4-dev libadwaita-1-dev build-essential pkg-config"
-  echo "  Fedora:         sudo dnf install gtk4-devel libadwaita-devel gcc pkg-config"
-  echo "  Arch:           sudo pacman -S --needed gtk4 libadwaita base-devel pkg-config"
-  echo "  openSUSE:       sudo zypper install gtk4-devel libadwaita-devel patterns-devel-base-devel_basis pkg-config"
-  echo
-  if ask "Try to install these automatically now?"; then
-    if need_cmd apt-get || need_cmd apt; then
-      sudo apt-get update && sudo apt-get install -y libgtk-4-dev libadwaita-1-dev build-essential pkg-config
-    elif need_cmd dnf; then
-      sudo dnf install -y gtk4-devel libadwaita-devel gcc pkg-config
-    elif need_cmd pacman; then
-      if [[ "${ASSUME_YES}" == "1" ]]; then
-        sudo pacman -S --needed --noconfirm gtk4 libadwaita base-devel pkg-config
-      else
-        sudo pacman -S --needed gtk4 libadwaita base-devel pkg-config
-      fi
-    elif need_cmd zypper; then
-      sudo zypper install -y gtk4-devel libadwaita-devel patterns-devel-base-devel_basis pkg-config
-    else
-      die "Unrecognized package manager — please install the packages manually."
-    fi
-    # Re-check after attempted install.
-    if need_cmd pkg-config; then
-      pkg-config --exists gtk4 2>/dev/null || die "gtk4 dev files still missing after install."
-      pkg-config --exists libadwaita-1 2>/dev/null || die "libadwaita-1 dev files still missing after install."
-    fi
+  if [[ "${AUTO_DEPS}" != "1" ]]; then
+    c_yellow "Missing dev packages: ${missing_pkgs[*]}"
+    print_manual_deps
+    die "Cannot continue without GTK4/libadwaita dev packages. (--no-deps disables auto-install)"
+  fi
+  c_yellow "Missing dev packages: ${missing_pkgs[*]} — installing automatically…"
+  ensure_pkg dev "GTK4/libadwaita dev packages"
+  # Re-check after install.
+  need_cmd pkg-config || die "pkg-config still missing after install."
+  pkg-config --exists gtk4 2>/dev/null || die "gtk4 dev files still missing after install."
+  pkg-config --exists libadwaita-1 2>/dev/null || die "libadwaita-1 dev files still missing after install."
+  c_green "Dev dependencies satisfied."
+else
+  info "Found GTK4 + libadwaita dev files."
+fi
+
+# 3. Flatpak + Flathub (needed to install/run Sober itself) — auto-install.
+if ! need_cmd flatpak; then
+  if [[ "${AUTO_FLATPAK}" != "1" ]]; then
+    c_yellow "Flatpak isn't installed (auto-install disabled via --no-flatpak)."
+    c_yellow "Lemonyde can still open, but it can't install/launch Sober."
+    echo "See https://flatpak.org/setup/ for instructions for your distro."
   else
-    if [[ -t 0 ]] || [[ "${ASSUME_YES}" == "1" ]]; then
-      die "Cannot continue without GTK4/libadwaita dev packages."
+    c_yellow "Flatpak isn't installed — installing automatically…"
+    if try_install_pkg flatpak "Flatpak"; then
+      c_green "Flatpak installed."
     else
-      die "Cannot continue without GTK4/libadwaita dev packages (non-interactive; re-run with --yes to auto-install where supported, or install manually)."
+      c_yellow "Lemonyde can still open, but it can't install/launch Sober."
+      echo "See https://flatpak.org/setup/ for instructions for your distro."
     fi
   fi
 fi
-
-# 3. Flatpak + Flathub (needed to install/run Sober itself)
-if ! need_cmd flatpak; then
-  c_yellow "Flatpak isn't installed. Lemonyde can still open, but it can't install/launch Sober."
-  echo "See https://flatpak.org/setup/ for instructions for your distro."
-else
+if need_cmd flatpak; then
   if ! flatpak remote-list 2>/dev/null | grep -qi '^flathub[[:space:]]'; then
     c_yellow "Adding the Flathub remote (needed to install Sober)…"
     flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo \
@@ -231,10 +476,23 @@ fi
 
 c_green "Done!"
 echo
-if [[ "${INSTALL_SOBER_PROMPT}" == "1" ]] && need_cmd flatpak && ! flatpak info org.vinegarhq.Sober >/dev/null 2>&1; then
-  if ask "Sober isn't installed yet — install it now via Flathub?"; then
-    flatpak install --user -y flathub org.vinegarhq.Sober \
-      || c_yellow "Warning: Sober install failed. You can install it later with: flatpak install --user flathub org.vinegarhq.Sober"
+# 6. Sober itself — auto-install, no prompt (unless --no-sober).
+if [[ "${INSTALL_SOBER_PROMPT}" == "1" ]]; then
+  if ! need_cmd flatpak; then
+    c_yellow "Skipping Sober install: Flatpak isn't available."
+  elif flatpak info org.vinegarhq.Sober >/dev/null 2>&1; then
+    info "Sober is already installed."
+  else
+    if [[ "${INTERACTIVE}" == "1" ]]; then
+      if ask "Sober isn't installed yet — install it now via Flathub?"; then
+        flatpak install --user -y flathub org.vinegarhq.Sober \
+          || c_yellow "Warning: Sober install failed. You can install it later with: flatpak install --user flathub org.vinegarhq.Sober"
+      fi
+    else
+      c_blue "→ Installing Sober via Flathub (automatic)…"
+      flatpak install --user -y flathub org.vinegarhq.Sober \
+        || c_yellow "Warning: Sober install failed. You can install it later with: flatpak install --user flathub org.vinegarhq.Sober"
+    fi
   fi
 fi
 

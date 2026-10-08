@@ -13,7 +13,6 @@ use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::thread;
 
-use gio::prelude::*;
 use glib::clone;
 use gtk4::prelude::*;
 use gtk4::{glib, gio};
@@ -21,7 +20,7 @@ use libadwaita as adw;
 use adw::prelude::*;
 use serde_json::{Map, Value};
 
-const APP_ID: &str = "org.lemonyde.Bootstrapper";
+const APP_ID: &str = "io.github.epicneco.Lemonyde";
 const SOBER_APP_ID: &str = "org.vinegarhq.Sober";
 
 /// Flags confirmed to be on Roblox's client-config allowlist as of the
@@ -347,7 +346,10 @@ type SharedState = Rc<RefCell<AppState>>;
 
 fn asset_dir() -> PathBuf {
     // Look next to the executable first (installed layout), then fall back
-    // to the source tree's ./assets for `cargo run`.
+    // to the source tree's assets/ for `cargo run`.
+    // The manifest lives in src/ (src/Cargo.toml), so the tree's assets/
+    // are one level up from CARGO_MANIFEST_DIR; a root Cargo.toml layout
+    // (assets next to the manifest) is also supported.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join("assets/lemonyde.svg");
@@ -356,7 +358,12 @@ fn asset_dir() -> PathBuf {
             }
         }
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let sibling = manifest.join("../assets");
+    if sibling.join("lemonyde.svg").exists() {
+        return sibling;
+    }
+    manifest.join("assets")
 }
 
 fn logo_path() -> PathBuf {
@@ -612,7 +619,7 @@ fn build_ui(app: &adw::Application) {
 
     // CSS: dark grey background, yellow text everywhere.
     let css = gtk4::CssProvider::new();
-    css.load_from_data(include_str!("../style.css"));
+    css.load_from_data(include_str!("../assets/style.css"));
     gtk4::style_context_add_provider_for_display(
         &WidgetExt::display(&window),
         &css,

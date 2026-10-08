@@ -327,7 +327,7 @@ else
   if [[ -f "${SCRIPT_SOURCE}" ]] && [[ "${SCRIPT_SOURCE}" != /dev/fd/* ]] && [[ "${SCRIPT_SOURCE}" != /proc/self/fd/* ]]; then
     CANDIDATE_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
   fi
-  if [[ -n "${CANDIDATE_DIR}" && -f "${CANDIDATE_DIR}/Cargo.toml" && -f "${CANDIDATE_DIR}/lemonyde.desktop" ]]; then
+  if [[ -n "${CANDIDATE_DIR}" && ( -f "${CANDIDATE_DIR}/Cargo.toml" || -f "${CANDIDATE_DIR}/src/Cargo.toml" ) ]]; then
     SRC_DIR="${CANDIDATE_DIR}"
   else
     # Piped via curl, or script shipped without sources: clone the repo.
@@ -354,8 +354,37 @@ else
   fi
 fi
 
-[[ -f "${SRC_DIR}/Cargo.toml" ]] || die "Cargo.toml not found in ${SRC_DIR} (repo layout unexpected)."
-[[ -f "${SRC_DIR}/lemonyde.desktop" ]] || die "lemonyde.desktop not found in ${SRC_DIR}."
+# Resolve the Cargo manifest automatically (supports both layouts):
+#   ./Cargo.toml        (classic root layout)
+#   ./src/Cargo.toml    (current Lemonyde layout, manifest lives in src/)
+MANIFEST_DIR=""
+if [[ -f "${SRC_DIR}/Cargo.toml" ]]; then
+  MANIFEST_DIR="${SRC_DIR}"
+elif [[ -f "${SRC_DIR}/src/Cargo.toml" ]]; then
+  MANIFEST_DIR="${SRC_DIR}/src"
+else
+  die "Cargo.toml not found in ${SRC_DIR} nor ${SRC_DIR}/src (repo layout unexpected)."
+fi
+MANIFEST_PATH="${MANIFEST_DIR}/Cargo.toml"
+info "Using Cargo manifest: ${MANIFEST_PATH}"
+
+# Resolve .desktop file (root, then AppDir/ — where it currently lives).
+DESKTOP_SRC=""
+for _cand in "${SRC_DIR}/lemonyde.desktop" "${SRC_DIR}/AppDir/lemonyde.desktop"; do
+  if [[ -f "${_cand}" ]]; then DESKTOP_SRC="${_cand}"; break; fi
+done
+[[ -n "${DESKTOP_SRC}" ]] || die "lemonyde.desktop not found in ${SRC_DIR} (checked ./lemonyde.desktop and ./AppDir/lemonyde.desktop)."
+
+# Resolve style.css (root, then assets/ — where it currently lives).
+STYLE_SRC=""
+for _cand in "${SRC_DIR}/style.css" "${SRC_DIR}/assets/style.css"; do
+  if [[ -f "${_cand}" ]]; then STYLE_SRC="${_cand}"; break; fi
+done
+[[ -n "${STYLE_SRC}" ]] || die "style.css not found in ${SRC_DIR} (checked ./style.css and ./assets/style.css)."
+
+ASSETS_DIR="${SRC_DIR}/assets"
+[[ -d "${ASSETS_DIR}" ]] || die "assets/ directory not found in ${SRC_DIR}."
+[[ -f "${ASSETS_DIR}/lemonyde.svg" ]] || die "assets/lemonyde.svg not found in ${SRC_DIR}."
 
 # 1. Rust toolchain — auto-install via rustup when cargo is missing.
 if ! need_cmd cargo; then
@@ -440,24 +469,26 @@ if need_cmd flatpak; then
   fi
 fi
 
-# 4. Build
+# 4. Build (manifest auto-detected above — no manual Cargo.toml handling needed)
 echo "Building Lemonyde (release, this can take a couple of minutes)…"
-(cd "${SRC_DIR}" && env -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS cargo build --release)
+(cd "${MANIFEST_DIR}" && env -u RUSTFLAGS -u CARGO_BUILD_RUSTFLAGS cargo build --release)
 
-BIN_SRC="${SRC_DIR}/target/release/lemonyde"
-[[ -x "${BIN_SRC}" || -f "${BIN_SRC}" ]] || die "Build finished but ${BIN_SRC} is missing."
-[[ -f "${SRC_DIR}/style.css" ]] || die "style.css not found in ${SRC_DIR}."
-[[ -d "${SRC_DIR}/assets" ]] || die "assets/ directory not found in ${SRC_DIR}."
-[[ -f "${SRC_DIR}/assets/lemonyde.svg" ]] || die "assets/lemonyde.svg not found in ${SRC_DIR}."
+# Binary lands under the manifest dir (src/target/... for the src/ layout);
+# also check the repo root for the classic layout / custom CARGO_TARGET_DIR.
+BIN_SRC=""
+for _cand in "${MANIFEST_DIR}/target/release/lemonyde" "${SRC_DIR}/target/release/lemonyde"; do
+  if [[ -x "${_cand}" || -f "${_cand}" ]]; then BIN_SRC="${_cand}"; break; fi
+done
+[[ -n "${BIN_SRC}" ]] || die "Build finished but target/release/lemonyde is missing (checked under ${MANIFEST_DIR} and ${SRC_DIR})."
 
 # 5. Install files
 echo "Installing Lemonyde to ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}/assets" "${BIN_DIR}" "${DESKTOP_DIR}" "${ICON_DIR}"
 cp -f "${BIN_SRC}" "${INSTALL_DIR}/lemonyde-bin"
 chmod +x "${INSTALL_DIR}/lemonyde-bin"
-cp -f "${SRC_DIR}/style.css" "${INSTALL_DIR}/style.css"
-cp -rf "${SRC_DIR}/assets/." "${INSTALL_DIR}/assets/"
-cp -f "${SRC_DIR}/assets/lemonyde.svg" "${ICON_DIR}/lemonyde.svg"
+cp -f "${STYLE_SRC}" "${INSTALL_DIR}/style.css"
+cp -rf "${ASSETS_DIR}/." "${INSTALL_DIR}/assets/"
+cp -f "${ASSETS_DIR}/lemonyde.svg" "${ICON_DIR}/lemonyde.svg"
 
 printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "${INSTALL_DIR}/lemonyde-bin" > "${BIN_DIR}/lemonyde"
 chmod +x "${BIN_DIR}/lemonyde"
@@ -465,7 +496,7 @@ chmod +x "${BIN_DIR}/lemonyde"
 esc_exec="$(sed_escape_replacement "${BIN_DIR}/lemonyde")"
 esc_icon="$(sed_escape_replacement "${ICON_DIR}/lemonyde.svg")"
 sed "s|^Exec=.*|Exec=${esc_exec}|; s|^Icon=.*|Icon=${esc_icon}|" \
-  "${SRC_DIR}/lemonyde.desktop" > "${DESKTOP_DIR}/lemonyde.desktop"
+  "${DESKTOP_SRC}" > "${DESKTOP_DIR}/lemonyde.desktop"
 chmod +x "${DESKTOP_DIR}/lemonyde.desktop"
 if need_cmd update-desktop-database; then
   update-desktop-database "${DESKTOP_DIR}" >/dev/null 2>&1 || true

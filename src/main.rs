@@ -358,6 +358,19 @@ fn asset_dir() -> PathBuf {
             }
         }
     }
+    // Installed via install.sh: ~/.local/share/lemonyde/assets/lemonyde.svg
+    // (i.e. $XDG_DATA_HOME/lemonyde/assets). Checked explicitly so the icon
+    // and other assets resolve even if the binary is launched through a
+    // symlink/wrapper in a different directory.
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".local/share")));
+    if let Some(data_home) = data_home {
+        let candidate = data_home.join("lemonyde/assets/lemonyde.svg");
+        if candidate.exists() {
+            return data_home.join("lemonyde/assets");
+        }
+    }
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let sibling = manifest.join("../assets");
     if sibling.join("lemonyde.svg").exists() {
@@ -368,6 +381,47 @@ fn asset_dir() -> PathBuf {
 
 fn logo_path() -> PathBuf {
     asset_dir().join("lemonyde.svg")
+}
+
+/// Icon name (without extension) of the proper app SVG:
+/// `assets/lemonyde.svg` — installed as
+/// `~/.local/share/lemonyde/assets/lemonyde.svg` and as
+/// `~/.local/share/icons/hicolor/scalable/apps/lemonyde.svg`.
+const APP_ICON_NAME_FALLBACK: &str = "lemonyde";
+
+/// Points this window (and, via the default, all future windows/dialogs) at
+/// the proper `lemonyde.svg` app icon. Without this the window falls back to
+/// a generic icon in the dock/taskbar/Alt-Tab switcher.
+///
+/// The file itself is found through `logo_path()` (which covers the installed
+/// `~/.local/share/lemonyde/assets/lemonyde.svg` layout as well as `cargo run`
+/// from the source tree). Its parent dir is added to the icon theme search
+/// path so the `"lemonyde"` icon name resolves to that exact SVG even when no
+/// hicolor-installed copy exists. `APP_ID` is preferred when the theme already
+/// provides an icon under the app-id name (proper Wayland compositor
+/// matching); otherwise we use the SVG's own stem.
+fn setup_app_icon(window: &adw::ApplicationWindow) {
+    let display = WidgetExt::display(window);
+    let icon_theme = gtk4::IconTheme::for_display(&display);
+
+    let icon_file = logo_path();
+    if icon_file.exists() {
+        if let Some(dir) = icon_file.parent() {
+            icon_theme.add_search_path(dir);
+        }
+    }
+
+    let name = if icon_theme.has_icon(APP_ID) {
+        APP_ID
+    } else {
+        // "lemonyde" resolves to assets/lemonyde.svg via the search path
+        // above, or to the hicolor-installed copy when present.
+        APP_ICON_NAME_FALLBACK
+    };
+    if icon_theme.has_icon(name) {
+        window.set_icon_name(Some(name));
+        gtk4::Window::set_default_icon_name(name);
+    }
 }
 
 fn title_logo_path() -> PathBuf {
@@ -616,6 +670,10 @@ fn build_ui(app: &adw::Application) {
         .content(&toast_overlay)
         .build();
     window.add_css_class("lemonyde-window");
+
+    // Use the proper assets/lemonyde.svg file for the window/app icon
+    // (dock, taskbar, Alt-Tab) instead of a generic fallback.
+    setup_app_icon(&window);
 
     // CSS: dark grey background, yellow text everywhere.
     let css = gtk4::CssProvider::new();

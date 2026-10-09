@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
-#
-# Lemonyde installer — fully automated, works both ways:
-#   ./install.sh                          # local checkout
-#   curl -fsSL https://raw.githubusercontent.com/epicneco/lemonyde/main/install.sh | bash
-#
-# Plain `curl ... | bash` installs EVERYTHING with zero prompts:
-# git (if a clone is needed), Rust via rustup (if cargo is missing),
-# GTK4/libadwaita dev headers, Flatpak + Flathub, then builds and
-# installs Lemonyde itself plus Sober. The only thing that may still
-# ask for input is sudo asking for YOUR password.
-#
-# Opt out of any step with --no-* flags (see --help).
-#
+
 set -euo pipefail
 
 if [[ -z "${BASH_VERSION:-}" ]]; then
@@ -29,8 +17,6 @@ BIN_DIR="${LEMONYDE_BIN_DIR:-${HOME}/.local/bin}"
 DESKTOP_DIR="${LEMONYDE_DESKTOP_DIR:-${HOME}/.local/share/applications}"
 ICON_DIR="${LEMONYDE_ICON_DIR:-${HOME}/.local/share/icons/hicolor/scalable/apps}"
 
-# Automation is the default. Every step below runs without asking.
-# Set to 0 via --no-* flags or LEMONYDE_NO_* env vars to skip a step.
 AUTO_DEPS="${LEMONYDE_NO_DEPS:+0}"
 AUTO_DEPS="${AUTO_DEPS:-1}"
 AUTO_RUST="${LEMONYDE_NO_RUST:+0}"
@@ -74,7 +60,7 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -y|--yes) shift ;; # no-op: automation is default since v2
+    -y|--yes) shift ;; 
     -i|--interactive) INTERACTIVE=1; shift ;;
     --no-sober) INSTALL_SOBER_PROMPT=0; shift ;;
     --no-deps) AUTO_DEPS=0; shift ;;
@@ -96,10 +82,7 @@ c_red() { printf '\033[1;31m%s\033[0m\n' "$1" >&2; }
 die() { c_red "$1"; exit "${2:-1}"; }
 info() { printf '%s\n' "$1"; }
 
-# ask "prompt" -> returns 0 for yes, 1 for no.
-# In default (automated) mode this always says yes without prompting.
-# With --interactive it asks on /dev/tty (never stdin, which is the
-# script itself when piped via curl); without a tty it defaults to No.
+
 ask() {
   local prompt="$1" def="${2:-N}" reply=""
   if [[ "${INTERACTIVE}" != "1" ]]; then
@@ -119,7 +102,7 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
-# Privilege escalation: empty when root, "sudo" otherwise.
+
 SUDO=""
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   SUDO=""
@@ -149,8 +132,6 @@ detect_pkg_mgr() {
   fi
 }
 
-# pkg_install pkg1 pkg2 ... — install system packages with the detected manager.
-# Returns 0 on success, 1 when no supported manager was found.
 pkg_install() {
   local mgr
   mgr="$(detect_pkg_mgr)"
@@ -197,8 +178,7 @@ print_manual_deps() {
   echo
 }
 
-# Deps per manager. Args: kind ("dev" | "git" | "curl" | "flatpak").
-# Prints a space-separated package list, or "" when the manager is unknown.
+
 deps_for() {
   local kind="$1" mgr="$2"
   case "${mgr}" in
@@ -261,14 +241,11 @@ deps_for() {
   esac
 }
 
-# ensure_pkg kind description — make sure a system dependency class is
-# installed, auto-installing it. Dies when automation is disabled (via
-# --no-* flags) or when the install fails. For FATAL dependencies only;
-# Flatpak uses try_install_pkg below so a failure only warns.
+
 ensure_pkg() {
   local kind="$1" desc="$2" mgr pkgs
   mgr="$(detect_pkg_mgr)"
-  # shellcheck disable=SC2206: intentional word splitting of package list
+  
   pkgs=($(deps_for "${kind}" "${mgr}"))
   if [[ "${#pkgs[@]}" -eq 0 ]]; then
     die "Unrecognized package manager — please install ${desc} manually, then re-run."
@@ -281,13 +258,11 @@ ensure_pkg() {
   pkg_install "${pkgs[@]}" || die "Failed to install ${desc}. Try manually, then re-run."
 }
 
-# try_install_pkg kind description — best-effort variant of ensure_pkg.
-# Returns 0 on success, 1 on failure/decline, but NEVER exits the script.
-# Used for Flatpak, where Lemonyde is still usable without it.
+
 try_install_pkg() {
   local kind="$1" desc="$2" mgr pkgs
   mgr="$(detect_pkg_mgr)"
-  # shellcheck disable=SC2206: intentional word splitting of package list
+
   pkgs=($(deps_for "${kind}" "${mgr}"))
   if [[ "${#pkgs[@]}" -eq 0 ]]; then
     c_yellow "Warning: unrecognized package manager — install ${desc} manually; see https://flatpak.org/setup/."
@@ -306,7 +281,7 @@ try_install_pkg() {
   fi
 }
 
-echo "🍋 Lemonyde bootstrapper (fully automated)"
+echo "      🍋🍹 Lemonyde installer"
 echo "------------------------------------------"
 
 # 0. Resolve sources: prefer a local checkout, otherwise clone.

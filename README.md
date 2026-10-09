@@ -17,7 +17,21 @@ libadwaita GUI for the stuff you'd otherwise do by hand in a terminal or
 text editor: installing/updating/launching Sober, editing FastFlags
 (FFlags), and tweaking its wrapper settings.
 
-keep in mind : **LEMONYDE IS IN DEVELOPMENT SO EXPECT CHANGES!**
+## keep in mind : **LEMONYDE IS IN DEVELOPMENT SO EXPECT CHANGES!**
+
+
+# Install
+
+```bash
+curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash
+```
+
+This builds Lemonyde in release mode, copies the binary + your lemon logo to
+`~/.local/share/lemonyde`, adds a `lemonyde` launcher to `~/.local/bin`,
+installs the logo into your icon theme, and adds a desktop entry so it shows
+up (with its icon) in your app menu. It offers to install any missing dev
+packages and to add the Flathub remote, but never runs `sudo` without asking.
+
 
 **Not affiliated with Roblox Corporation or VinegarHQ.** Sober itself stays
 exactly as VinegarHQ ships it — Lemonyde only edits Sober's own config files
@@ -68,57 +82,6 @@ and calls `flatpak` on your behalf.
   and do a full FFlag/config reset (mirrors VinegarHQ's official reset steps).
 - **And many more.**
   
-## Requirements
-
-To **build**:
-- Rust (stable, via [rustup](https://rustup.rs) — the crates this depends on
-  need a fairly current toolchain)
-- GTK 4 and libadwaita development headers:
-  - Debian/Ubuntu: `sudo apt install libgtk-4-dev libadwaita-1-dev build-essential`
-  - Fedora: `sudo dnf install gtk4-devel libadwaita-devel`
-  - Arch: `sudo pacman -S --needed gtk4 libadwaita base-devel`
-
-To **run**: GTK 4.14+ and libadwaita 1.5+ runtime libraries (already on
-most current GNOME/KDE desktops), plus Flatpak (with the Flathub remote) to
-install/launch Sober itself.
-
-## Install
-
-```bash
-curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash
-```
-
-This builds Lemonyde in release mode, copies the binary + your lemon logo to
-`~/.local/share/lemonyde`, adds a `lemonyde` launcher to `~/.local/bin`,
-installs the logo into your icon theme, and adds a desktop entry so it shows
-up (with its icon) in your app menu. It offers to install any missing dev
-packages and to add the Flathub remote, but never runs `sudo` without asking.
-
-## Build & run without installing
-
-```bash
-cargo run --release
-```
-
-## A note on the build
-
-The `Cargo.toml` here pins `gtk4`, `libadwaita`, `glib`, and `gio` to a
-known-compatible version line (gtk4 ~0.9 / libadwaita ~0.7 / glib+gio ~0.20).
-If you want to move to a newer gtk4-rs release later, bump all four together
-— they're versioned as a set, and mixing versions across them is the most
-common cause of build errors in gtk4-rs projects.
-
-
-## About Sober's first-run wizard
-
-The first time each slot launches, Sober shows its own "Welcome to Sober" /
-"Optional Sober Configuration" onboarding — that's Sober's own one-time
-ToS/privacy acknowledgment and feature-permission setup, not something
-Lemonyde adds, and there's no known flag to skip it. Click through it once
-per slot; Sober should remember it and open straight into Roblox on
-subsequent launches of that same slot. If a slot keeps landing back on the
-wizard, its config likely isn't being saved — check that
-`~/.local/share/lemonyde/instances/slot-N` is actually writable.
 
 ## Where things live
 

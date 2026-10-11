@@ -78,8 +78,8 @@ done
 c_green() { printf '\033[1;32m%s\033[0m\n' "$1"; }
 c_yellow() { printf '\033[1;33m%s\033[0m\n' "$1"; }
 c_blue() { printf '\033[1;34m%s\033[0m\n' "$1"; }
-c_red() { printf '\033[1;31m%s\033[0m\n' "$1" >&2; }
-die() { c_red "$1"; exit "${2:-1}"; }
+c_red() { printf '\033[1;31m%s\033[0m' "$1" >&2; }
+die() { c_red "$1"; echo; exit "${2:-1}"; }
 info() { printf '%s\n' "$1"; }
 
 
@@ -103,14 +103,29 @@ need_cmd() {
 }
 
 
+# Find and set an available root command (sudo, doas, etc.)
+find_root_cmd() {
+  # Check common privilege escalation commands in order of preference
+  for cmd in sudo doas opendoas sudo-rs; do
+    if need_cmd "$cmd"; then
+      echo "$cmd"
+      return 0
+    fi
+  done
+  return 1
+}
+
 SUDO=""
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
   SUDO=""
-elif need_cmd sudo; then
-  SUDO="sudo"
 else
-  c_yellow "Warning: not running as root and 'sudo' not found — system package installs will fail."
-  c_yellow "Re-run as root or install sudo, or install dependencies manually (see --help output on failure)."
+  if ROOT_CMD="$(find_root_cmd)"; then
+    SUDO="$ROOT_CMD"
+  else
+    c_yellow "Warning: not running as root and no privilege escalation command found."
+    c_yellow "Checked for: sudo, doas, opendoas, sudo-rs"
+    c_yellow "System package installs will fail. Re-run as root, install one of the above, or install dependencies manually (see --help output on failure)."
+  fi
 fi
 
 sed_escape_replacement() {

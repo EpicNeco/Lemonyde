@@ -1575,7 +1575,7 @@ fn build_home_page(
         // first when flatpak isn't even present, else the Flathub flatpak.
         let argv = match native_pkg_argv(PkgOp::Install) {
             Some(argv) if (flavor == MocktailFlavor::Native || !flatpak_present()) => argv,
-            _ => vec!["flatpak".into(), "install".into(), "--user".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()],
+            _ => vec!["flatpak".into(), "install".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()],
         };
         set_buttons_sensitive(false);
         log_line(&home_log, &format!("$ {}", argv.join(" ")));

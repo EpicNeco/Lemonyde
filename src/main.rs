@@ -1,5 +1,7 @@
-// Lemonyde — an unofficial community bootstrapper for the Mocktail flatpak
+// Lemonyde — an unofficial community bootstrapper for Mocktail
 // (Roblox on Linux: https://mocktail.bigrat.space/).
+// Works with both install flavors: the Flathub flatpak
+// (space.bigrat.mocktail) and native packages from distro repos / the AUR.
 //
 // Not affiliated with Roblox Corporation or the Mocktail project authors.
 // Provided as-is.
@@ -106,11 +108,18 @@ struct Paths {
 }
 
 impl Paths {
-    fn new() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let base = home.join(".var/app").join(MOCKTAIL_APP_ID);
-        let config_dir = base.join("config/mocktail");
-        let data_dir = base.join("data/mocktail");
+    /// Locates Mocktail's config/data directories for the install flavor.
+    /// Flatpak keeps everything under `~/.var/app/<id>/`; native builds follow
+    /// the XDG spec (`~/.config/mocktail`, `$XDG_DATA_HOME/mocktail`).
+    fn new(flavor: MocktailFlavor) -> Self {
+        let (config_dir, data_dir) = match flavor {
+            MocktailFlavor::Native => (xdg_config_home().join("mocktail"), xdg_data_home().join("mocktail")),
+            // Flatpak, or nothing installed yet (default to the flatpak layout).
+            _ => {
+                let base = real_home().join(".var/app").join(MOCKTAIL_APP_ID);
+                (base.join("config/mocktail"), base.join("data/mocktail"))
+            }
+        };
         Paths {
             fflags_file: config_dir.join("fflags.json"),
             settings_file: config_dir.join("config.yaml"),
@@ -125,16 +134,11 @@ impl Paths {
 // --------------------------------------------------------------------------
 // Multi-instance support
 //
-// Running a second `flatpak run space.bigrat.mocktail` with the same $HOME
-// makes both instances fight over the same config, Roblox payload, and login
-// data. The fix (a well-known Flatpak trick, not specific to Mocktail) is to
-// give each extra instance its own fake $HOME — Flatpak resolves an app's
-// private data at $HOME/.var/app/<id>, so a different $HOME means a
-// completely separate config (config/mocktail), data (data/mocktail), and
-// login session per slot. We keep XDG_DATA_HOME/XDG_CONFIG_HOME/XDG_CACHE_HOME
-// pointed at their real locations so the `flatpak` command itself can still
-// find the installed app (which lives under the *real* user's
-// ~/.local/share/flatpak, untouched by the fake HOME).
+// Running a second Mocktail with the same $HOME makes both instances fight
+// over the same config, Roblox payload, and login data. The fix is to give
+// each extra instance its own fake $HOME (plus XDG_* redirection for native
+// builds — see `spawn_slot_process`), so each slot gets a completely separate
+// config (config/mocktail), data (data/mocktail), and login session.
 //
 // Note: Mocktail's own FAQ declines to support multi-instance launching;
 // this is Lemonyde doing it from the outside. Roblox's ToS prohibit running
@@ -171,15 +175,35 @@ fn slot_home(n: u32) -> PathBuf {
 /// handle so the caller can track it (and detect when it exits) rather than
 /// firing-and-forgetting — a double launch into the same slot would have both
 /// processes sharing one config/data tree.
-fn spawn_slot_process(n: u32) -> std::io::Result<std::process::Child> {
+///
+/// Flatpak: only HOME is faked (Flatpak resolves the app's private
+/// `~/.var/app/<id>` inside the sandbox); XDG_* stay real so the `flatpak`
+/// command can still find the installed app under the real user's
+/// `~/.local/share/flatpak`.
+///
+/// Native: HOME *and* XDG_* are redirected into the slot, since a native
+/// build reads `$XDG_CONFIG_HOME/mocktail` and friends directly.
+fn spawn_slot_process(n: u32, flavor: MocktailFlavor) -> std::io::Result<std::process::Child> {
     let home = slot_home(n);
     std::fs::create_dir_all(&home)?;
-    Command::new("flatpak")
-        .env("HOME", &home)
-        .env("XDG_DATA_HOME", xdg_data_home())
-        .env("XDG_CONFIG_HOME", xdg_config_home())
-        .env("XDG_CACHE_HOME", xdg_cache_home())
-        .args(["run", MOCKTAIL_APP_ID])
+    let mut cmd = match flavor {
+        MocktailFlavor::Native => {
+            let mut cmd = Command::new("mocktail");
+            cmd.env("XDG_CONFIG_HOME", home.join(".config"))
+                .env("XDG_DATA_HOME", home.join(".local/share"))
+                .env("XDG_CACHE_HOME", home.join(".cache"));
+            cmd
+        }
+        _ => {
+            let mut cmd = Command::new("flatpak");
+            cmd.env("XDG_DATA_HOME", xdg_data_home())
+                .env("XDG_CONFIG_HOME", xdg_config_home())
+                .env("XDG_CACHE_HOME", xdg_cache_home())
+                .args(["run", MOCKTAIL_APP_ID]);
+            cmd
+        }
+    };
+    cmd.env("HOME", &home)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -304,13 +328,17 @@ fn yaml_set(text: &str, keys: &[&str], value: &str) -> String {
 
     match yaml_locate(&lines, keys) {
         Some(line) => {
-            let (indent, _, rest) = yaml_line_key(&lines[line]).unwrap_or((0, "", ""));
+            // Pull the info we need out of the line before mutating `lines`.
+            let (indent, is_section) = match yaml_line_key(&lines[line]) {
+                Some((indent, _, rest)) => (indent, yaml_scalar(rest).is_empty()),
+                None => (0, false),
+            };
             lines[line] = format!("{}{}: {}", " ".repeat(indent), last_key, value);
-            if yaml_scalar(rest).is_empty() {
+            if is_section {
                 // The key existed as a section (e.g. Mocktail's detailed
                 // `device:` map) — drop its children so we don't leave a
                 // half-orphaned mapping below the new scalar value.
-                let mut j = line + 1;
+                let j = line + 1;
                 while j < lines.len() {
                     match yaml_line_key(&lines[j]) {
                         Some((ind, _, _)) if ind > indent => {
@@ -402,11 +430,26 @@ fn value_to_string(v: &Value) -> String {
 }
 
 // --------------------------------------------------------------------------
-// Flatpak helpers
+// Mocktail install-method detection & helpers
 // --------------------------------------------------------------------------
 
+/// Which Mocktail build the user actually has (or would end up with).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MocktailFlavor {
+    /// Sandboxed Flathub build (`space.bigrat.mocktail`).
+    Flatpak,
+    /// Native package from a distro repo / AUR — a `mocktail` binary on $PATH.
+    Native,
+    /// Not installed (yet).
+    None,
+}
+
+fn which_cmd(name: &str) -> bool {
+    Command::new("which").arg(name).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
 fn flatpak_present() -> bool {
-    Command::new("which").arg("flatpak").output().map(|o| o.status.success()).unwrap_or(false)
+    which_cmd("flatpak")
 }
 
 fn mocktail_installed() -> bool {
@@ -417,32 +460,200 @@ fn mocktail_installed() -> bool {
         .unwrap_or(false)
 }
 
-fn mocktail_version() -> Option<String> {
-    let out = Command::new("flatpak").args(["info", MOCKTAIL_APP_ID]).output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    for line in text.lines() {
-        if let Some(rest) = line.trim().strip_prefix("Version:") {
-            return Some(rest.trim().to_string());
-        }
+/// Detects how Mocktail is installed: Flatpak first (it's the
+/// upstream-recommended route and wins if both are present), then a native
+/// `mocktail` binary from a distro repo/AUR package.
+fn detect_mocktail_flavor() -> MocktailFlavor {
+    if mocktail_installed() {
+        MocktailFlavor::Flatpak
+    } else if which_cmd("mocktail") {
+        MocktailFlavor::Native
+    } else {
+        MocktailFlavor::None
     }
-    None
 }
 
-/// Counts how many sandboxed Mocktail processes are currently running, via
-/// `flatpak ps`. Each `flatpak run` spawns its own sandbox instance, so
-/// this is also how we confirm a multi-instance launch actually took.
-fn running_instance_count() -> usize {
-    Command::new("flatpak")
-        .args(["ps", "--columns=application"])
-        .output()
-        .ok()
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .filter(|l| l.trim() == MOCKTAIL_APP_ID)
-                .count()
-        })
-        .unwrap_or(0)
+fn mocktail_version(flavor: MocktailFlavor) -> Option<String> {
+    match flavor {
+        MocktailFlavor::Flatpak => {
+            let out = Command::new("flatpak").args(["info", MOCKTAIL_APP_ID]).output().ok()?;
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                if let Some(rest) = line.trim().strip_prefix("Version:") {
+                    return Some(rest.trim().to_string());
+                }
+            }
+            None
+        }
+        MocktailFlavor::Native => {
+            let out = Command::new("mocktail").arg("--version").output().ok()?;
+            let text = String::from_utf8_lossy(&out.stdout);
+            text.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string)
+        }
+        MocktailFlavor::None => None,
+    }
+}
+
+/// Counts how many Mocktail processes are currently running. Flatpak builds
+/// are counted via `flatpak ps` (each `flatpak run` is its own sandbox
+/// instance, which is also how we confirm a multi-instance launch took);
+/// native builds are counted by process name.
+fn running_instance_count(flavor: MocktailFlavor) -> usize {
+    match flavor {
+        MocktailFlavor::Flatpak => {
+            Command::new("flatpak")
+                .args(["ps", "--columns=application"])
+                .output()
+                .ok()
+                .map(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .filter(|l| l.trim() == MOCKTAIL_APP_ID)
+                        .count()
+                })
+                .unwrap_or(0)
+        }
+        MocktailFlavor::Native => Command::new("ps")
+            .args(["-eo", "comm="])
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .filter(|l| l.trim() == "mocktail")
+                    .count()
+            })
+            .unwrap_or(0),
+        MocktailFlavor::None => 0,
+    }
+}
+
+/// argv for starting Mocktail under `flavor`, optionally with
+/// `MOCKTAIL_TEXTURE_DUMP_DIR` set. Flatpak takes the variable as an
+/// `--env=` flag; the native binary gets it through the `env` command so
+/// `run_streaming` doesn't need per-spawn environment plumbing.
+fn launch_argv(flavor: MocktailFlavor, texture_dump_dir: Option<&std::path::Path>) -> Vec<String> {
+    match (flavor, texture_dump_dir) {
+        (MocktailFlavor::Native, Some(dir)) => vec![
+            "env".into(),
+            format!("MOCKTAIL_TEXTURE_DUMP_DIR={}", dir.display()),
+            "mocktail".into(),
+        ],
+        (MocktailFlavor::Native, None) => vec!["mocktail".into()],
+        (_, Some(dir)) => vec![
+            "flatpak".into(),
+            "run".into(),
+            format!("--env=MOCKTAIL_TEXTURE_DUMP_DIR={}", dir.display()),
+            MOCKTAIL_APP_ID.into(),
+        ],
+        (_, None) => vec!["flatpak".into(), "run".into(), MOCKTAIL_APP_ID.into()],
+    }
+}
+
+/// Package-manager operations against the native `mocktail` package.
+#[derive(Clone, Copy)]
+enum PkgOp {
+    Install,
+    Update,
+    Remove,
+}
+
+/// Builds an argv for installing/updating/removing the native `mocktail`
+/// package through whatever the user's distro uses. AUR helpers are checked
+/// first (Mocktail lives in the AUR on Arch-likes) and escalate to root
+/// themselves; other package managers get a sudo/doas prefix. Returns `None`
+/// when nothing suitable is available.
+fn native_pkg_argv(op: PkgOp) -> Option<Vec<String>> {
+    const PKG: &str = "mocktail";
+
+    for helper in ["paru", "yay"] {
+        if which_cmd(helper) {
+            let mut argv = vec![helper.to_string()];
+            let flags: &[&str] = match op {
+                PkgOp::Install => &["-S", "--needed", "--noconfirm"],
+                PkgOp::Update => &["-Syu", "--noconfirm"],
+                PkgOp::Remove => &["-Rns"],
+            };
+            argv.extend(flags.iter().map(|s| s.to_string()));
+            argv.push(PKG.into());
+            return Some(argv);
+        }
+    }
+
+    let root = ["sudo", "doas", "sudo-rs"].into_iter().find(|c| which_cmd(c))?.to_string();
+    let mut argv = vec![root];
+
+    if which_cmd("dnf") || which_cmd("yum") {
+        argv.push(if which_cmd("dnf") { "dnf" } else { "yum" }.into());
+        argv.push(
+            match op {
+                PkgOp::Install => "install",
+                PkgOp::Update => "upgrade",
+                PkgOp::Remove => "remove",
+            }
+            .into(),
+        );
+        argv.extend(["-y", PKG].map(String::from));
+    } else if which_cmd("pacman") {
+        argv.push("pacman".into());
+        let flags: &[&str] = match op {
+            PkgOp::Install => &["-S", "--needed", "--noconfirm", PKG],
+            PkgOp::Update => &["-Syu", "--noconfirm", PKG],
+            PkgOp::Remove => &["-Rns", "--noconfirm", PKG],
+        };
+        argv.extend(flags.iter().map(|s| s.to_string()));
+    } else if which_cmd("zypper") {
+        argv.extend(
+            [
+                "zypper",
+                "--non-interactive",
+                match op {
+                    PkgOp::Install => "install",
+                    PkgOp::Update => "update",
+                    PkgOp::Remove => "remove",
+                },
+                PKG,
+            ]
+            .map(String::from),
+        );
+    } else if which_cmd("apt-get") {
+        argv.push("apt-get".into());
+        argv.push("install".into());
+        argv.push("-y".into());
+        if matches!(op, PkgOp::Update) {
+            argv.push("--only-upgrade".into());
+        }
+        argv.push(PKG.into());
+    } else if which_cmd("apk") {
+        argv.push("apk".into());
+        argv.push(
+            match op {
+                PkgOp::Install => "add",
+                PkgOp::Update => "upgrade",
+                PkgOp::Remove => "del",
+            }
+            .into(),
+        );
+        argv.push(PKG.into());
+    } else if which_cmd("xbps-install") || which_cmd("xbps-remove") {
+        match op {
+            PkgOp::Remove => {
+                if !which_cmd("xbps-remove") {
+                    return None;
+                }
+                argv.extend(["xbps-remove", "-R", PKG].map(String::from));
+            }
+            _ => {
+                if !which_cmd("xbps-install") {
+                    return None;
+                }
+                argv.push("xbps-install".into());
+                argv.extend(if matches!(op, PkgOp::Install) { ["-Sy", PKG] } else { ["-Syu", PKG] }.map(String::from));
+            }
+        }
+    } else {
+        return None;
+    }
+    Some(argv)
 }
 
 enum StreamMsg {
@@ -532,6 +743,9 @@ fn run_streaming(
 struct AppState {
     paths: Paths,
     fflags: Map<String, Value>,
+    /// How Mocktail is installed (Flatpak vs. native package), detected at
+    /// startup. Launch/install/update/uninstall all branch on this.
+    flavor: MocktailFlavor,
 }
 
 type SharedState = Rc<RefCell<AppState>>;
@@ -748,9 +962,14 @@ fn main() -> glib::ExitCode {
 }
 
 fn build_ui(app: &adw::Application) {
+    // Detect the install flavor once up front — every page (paths, launch
+    // commands, install/update/uninstall) branches on it. Detection is a
+    // couple of quick subprocess checks (`flatpak info`, `which mocktail`).
+    let flavor = detect_mocktail_flavor();
     let state: SharedState = Rc::new(RefCell::new(AppState {
-        paths: Paths::new(),
+        paths: Paths::new(flavor),
         fflags: Map::new(),
+        flavor,
     }));
     {
         let mut s = state.borrow_mut();
@@ -786,16 +1005,27 @@ fn build_ui(app: &adw::Application) {
 
     let view_stack = adw::ViewStack::new();
 
-    let switcher_title = adw::ViewSwitcherTitle::builder().stack(&view_stack).title("Lemonyde").build();
-    let header = adw::HeaderBar::builder().title_widget(&switcher_title).build();
+    let switcher = adw::ViewSwitcher::builder()
+        .stack(&view_stack)
+        .policy(adw::ViewSwitcherPolicy::Wide)
+        .build();
+    let header = adw::HeaderBar::builder().title_widget(&switcher).build();
     toolbar_view.add_top_bar(&header);
 
     let switcher_bar = adw::ViewSwitcherBar::builder().stack(&view_stack).build();
-    switcher_title
-        .bind_property("title-visible", &switcher_bar, "reveal")
-        .sync_create()
-        .build();
     toolbar_view.add_bottom_bar(&switcher_bar);
+
+    // libadwaita 1.4 replacement for the deprecated AdwViewSwitcherTitle:
+    // a wide ViewSwitcher in the header, plus a breakpoint that removes it
+    // and reveals the bottom switcher bar on narrow windows. The window
+    // title ("Lemonyde") still shows in the header bar when the switcher
+    // is unset.
+    if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 550sp") {
+        let breakpoint = adw::Breakpoint::new(condition);
+        breakpoint.add_setter(&header, "title-widget", None);
+        breakpoint.add_setter(&switcher_bar, "reveal", Some(&true.to_value()));
+        window.add_breakpoint(breakpoint);
+    }
 
     toolbar_view.set_content(Some(&view_stack));
 
@@ -937,15 +1167,16 @@ fn build_home_page(
         let btn_install = btn_install.clone();
         let btn_update = btn_update.clone();
         let btn_uninstall = btn_uninstall.clone();
+        let state = state.clone();
         Rc::new(move || {
             status_row.set_title("Checking Mocktail installation…");
             status_icon.set_icon_name(Some("content-loading-symbolic"));
 
-            let (sender, receiver) = async_channel::bounded::<(bool, Option<String>)>(1);
+            let (sender, receiver) = async_channel::bounded::<(MocktailFlavor, Option<String>)>(1);
             thread::spawn(move || {
-                let installed = mocktail_installed();
-                let version = if installed { mocktail_version() } else { None };
-                let _ = sender.send_blocking((installed, version));
+                let flavor = detect_mocktail_flavor();
+                let version = mocktail_version(flavor);
+                let _ = sender.send_blocking((flavor, version));
             });
 
             // Manual clones (rather than the `clone!` macro) so this works
@@ -956,33 +1187,45 @@ fn build_home_page(
             let btn_install = btn_install.clone();
             let btn_update = btn_update.clone();
             let btn_uninstall = btn_uninstall.clone();
+            let state = state.clone();
             glib::spawn_future_local(async move {
-                if let Ok((installed, version)) = receiver.recv().await {
-                    if !flatpak_present() {
-                        status_row.set_title("Flatpak is not installed on this system");
-                        status_row.set_subtitle("Install flatpak from your distro's package manager, then reopen Lemonyde.");
-                        status_icon.set_icon_name(Some("dialog-warning-symbolic"));
-                        for b in [&btn_launch, &btn_install, &btn_update, &btn_uninstall] {
-                            b.set_sensitive(false);
+                if let Ok((flavor, version)) = receiver.recv().await {
+                    // Keep the shared state in sync — the user may have
+                    // installed/uninstalled between refreshes.
+                    state.borrow_mut().flavor = flavor;
+                    match flavor {
+                        MocktailFlavor::Flatpak => {
+                            status_row.set_title("Mocktail is installed (Flatpak)");
+                            status_row.set_subtitle(&version.map(|v| format!("Version {v}")).unwrap_or_else(|| "Ready to launch".into()));
+                            status_icon.set_icon_name(Some("emblem-ok-symbolic"));
+                            btn_launch.set_visible(true);
+                            btn_install.set_visible(false);
+                            btn_update.set_sensitive(true);
+                            btn_uninstall.set_sensitive(true);
                         }
-                        return;
-                    }
-                    if installed {
-                        status_row.set_title("Mocktail is installed");
-                        status_row.set_subtitle(&version.map(|v| format!("Version {v}")).unwrap_or_else(|| "Ready to launch".into()));
-                        status_icon.set_icon_name(Some("emblem-ok-symbolic"));
-                        btn_launch.set_visible(true);
-                        btn_install.set_visible(false);
-                        btn_update.set_sensitive(true);
-                        btn_uninstall.set_sensitive(true);
-                    } else {
-                        status_row.set_title("Mocktail is not installed");
-                        status_row.set_subtitle("Install it from Flathub to get started");
-                        status_icon.set_icon_name(Some("dialog-information-symbolic"));
-                        btn_launch.set_visible(false);
-                        btn_install.set_visible(true);
-                        btn_update.set_sensitive(false);
-                        btn_uninstall.set_sensitive(false);
+                        MocktailFlavor::Native => {
+                            status_row.set_title("Mocktail is installed (native package)");
+                            status_row.set_subtitle(&version.map(|v| format!("Version {v}")).unwrap_or_else(|| "Ready to launch".into()));
+                            status_icon.set_icon_name(Some("emblem-ok-symbolic"));
+                            btn_launch.set_visible(true);
+                            btn_install.set_visible(false);
+                            btn_update.set_sensitive(true);
+                            btn_uninstall.set_sensitive(true);
+                        }
+                        MocktailFlavor::None => {
+                            if flatpak_present() {
+                                status_row.set_title("Mocktail is not installed");
+                                status_row.set_subtitle("Install it from Flathub to get started");
+                            } else {
+                                status_row.set_title("Mocktail is not installed");
+                                status_row.set_subtitle("Install it via Flatpak or your distro's package manager");
+                            }
+                            status_icon.set_icon_name(Some("dialog-information-symbolic"));
+                            btn_launch.set_visible(false);
+                            btn_install.set_visible(true);
+                            btn_update.set_sensitive(false);
+                            btn_uninstall.set_sensitive(false);
+                        }
                     }
                 }
             });
@@ -993,11 +1236,13 @@ fn build_home_page(
 
     let refresh_running: Rc<dyn Fn()> = {
         let running_row = running_row.clone();
+        let state = state.clone();
         Rc::new(move || {
             running_row.set_subtitle("Checking…");
+            let flavor = state.borrow().flavor;
             let (sender, receiver) = async_channel::bounded::<usize>(1);
             thread::spawn(move || {
-                let _ = sender.send_blocking(running_instance_count());
+                let _ = sender.send_blocking(running_instance_count(flavor));
             });
             let running_row = running_row.clone();
             glib::spawn_future_local(async move {
@@ -1014,7 +1259,7 @@ fn build_home_page(
     };
     refresh_running();
 
-    refresh_running_btn.connect_clicked(clone!(@strong refresh_running => move |_| {
+    refresh_running_btn.connect_clicked(clone!(#[strong] refresh_running, move |_| {
         refresh_running();
     }));
 
@@ -1025,7 +1270,7 @@ fn build_home_page(
     let active_slots: Rc<RefCell<HashSet<u32>>> = Rc::new(RefCell::new(HashSet::new()));
     let (exit_tx, exit_rx) = async_channel::unbounded::<u32>();
 
-    glib::spawn_future_local(clone!(@strong active_slots, @strong home_log, @strong refresh_running => async move {
+    glib::spawn_future_local(clone!(#[strong] active_slots, #[strong] home_log, #[strong] refresh_running, async move {
         while let Ok(n) = exit_rx.recv().await {
             active_slots.borrow_mut().remove(&n);
             log_line(&home_log, &format!("Slot {n} closed — free to relaunch"));
@@ -1036,6 +1281,7 @@ fn build_home_page(
     fn launch_step(
         i: u32,
         n: u32,
+        flavor: MocktailFlavor,
         home_log: gtk4::TextView,
         active_slots: Rc<RefCell<HashSet<u32>>>,
         exit_tx: async_channel::Sender<u32>,
@@ -1048,7 +1294,7 @@ fn build_home_page(
         if already_running {
             log_line(&home_log, &format!("Slot {i} is already running — close it before relaunching, skipping"));
         } else {
-            match spawn_slot_process(i) {
+            match spawn_slot_process(i, flavor) {
                 Ok(child) => {
                     active_slots.borrow_mut().insert(i);
                     log_line(&home_log, &format!("Slot {i} launched — complete its one-time sign-in/setup, it'll go straight to Roblox next time"));
@@ -1070,7 +1316,7 @@ fn build_home_page(
             let exit_tx = exit_tx.clone();
             let refresh_running = refresh_running.clone();
             glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
-                launch_step(i + 1, n, home_log, active_slots, exit_tx, refresh_running);
+                launch_step(i + 1, n, flavor, home_log, active_slots, exit_tx, refresh_running);
             });
         } else {
             let refresh_running = refresh_running.clone();
@@ -1080,15 +1326,14 @@ fn build_home_page(
         }
     }
 
-    launch_multi_btn.connect_clicked(clone!(@strong toast, @strong home_log, @strong instances_spin,
-        @strong refresh_running, @strong active_slots, @strong exit_tx => move |_| {
+    launch_multi_btn.connect_clicked(clone!(#[strong] toast, #[strong] home_log, #[strong] instances_spin, #[strong] refresh_running, #[strong] active_slots, #[strong] exit_tx, #[strong] state, move |_| {
         let n = instances_spin.value() as u32;
         if n == 0 {
             return;
         }
         log_line(&home_log, &format!("$ launching up to {n} Mocktail instance(s)…"));
         toast(&format!("Launching up to {n} instance(s)…"));
-        launch_step(1, n, home_log.clone(), active_slots.clone(), exit_tx.clone(), refresh_running.clone());
+        launch_step(1, n, state.borrow().flavor, home_log.clone(), active_slots.clone(), exit_tx.clone(), refresh_running.clone());
     }));
 
     let set_buttons_sensitive = {
@@ -1100,9 +1345,11 @@ fn build_home_page(
         }
     };
 
-    btn_launch.connect_clicked(clone!(@strong toast => move |_| {
-        let spawned = Command::new("flatpak")
-            .args(["run", MOCKTAIL_APP_ID])
+    btn_launch.connect_clicked(clone!(#[strong] toast, #[strong] state, move |_| {
+        let flavor = state.borrow().flavor;
+        let argv = launch_argv(flavor, None);
+        let spawned = Command::new(&argv[0])
+            .args(&argv[1..])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
@@ -1112,14 +1359,19 @@ fn build_home_page(
         }
     }));
 
-    btn_install.connect_clicked(clone!(@strong home_log, @strong toast, @strong refresh_status,
-        @strong set_buttons_sensitive => move |_| {
+    btn_install.connect_clicked(clone!(#[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, #[strong] state, move |_| {
+        let flavor = state.borrow().flavor;
+        // Not installed: use whichever route is available — native package
+        // first when flatpak isn't even present, else the Flathub flatpak.
+        let argv = match native_pkg_argv(PkgOp::Install) {
+            Some(argv) if (flavor == MocktailFlavor::Native || !flatpak_present()) => argv,
+            _ => vec!["flatpak".into(), "install".into(), "--user".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()],
+        };
         set_buttons_sensitive(false);
-        log_line(&home_log, "$ flatpak install --user -y flathub space.bigrat.mocktail");
-        let argv = vec!["flatpak".into(), "install".into(), "--user".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()];
+        log_line(&home_log, &format!("$ {}", argv.join(" ")));
         run_streaming(argv,
-            clone!(@strong home_log => move |l| log_line(&home_log, &l)),
-            clone!(@strong toast, @strong refresh_status, @strong set_buttons_sensitive => move |code| {
+            clone!(#[strong] home_log, move |l| log_line(&home_log, &l)),
+            clone!(#[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, move |code| {
                 set_buttons_sensitive(true);
                 toast(if code == 0 { "Mocktail installed" } else { "Install failed — see activity log" });
                 refresh_status();
@@ -1127,14 +1379,24 @@ fn build_home_page(
         );
     }));
 
-    btn_update.connect_clicked(clone!(@strong home_log, @strong toast, @strong refresh_status,
-        @strong set_buttons_sensitive => move |_| {
+    btn_update.connect_clicked(clone!(#[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, #[strong] state, move |_| {
+        let flavor = state.borrow().flavor;
         set_buttons_sensitive(false);
-        log_line(&home_log, "$ flatpak update -y space.bigrat.mocktail");
-        let argv = vec!["flatpak".into(), "update".into(), "-y".into(), MOCKTAIL_APP_ID.into()];
+        let argv = match flavor {
+            MocktailFlavor::Native => match native_pkg_argv(PkgOp::Update) {
+                Some(argv) => argv,
+                None => {
+                    set_buttons_sensitive(true);
+                    toast("No supported package manager found — update via your distro");
+                    return;
+                }
+            },
+            _ => vec!["flatpak".into(), "update".into(), "-y".into(), MOCKTAIL_APP_ID.into()],
+        };
+        log_line(&home_log, &format!("$ {}", argv.join(" ")));
         run_streaming(argv,
-            clone!(@strong home_log => move |l| log_line(&home_log, &l)),
-            clone!(@strong toast, @strong refresh_status, @strong set_buttons_sensitive => move |code| {
+            clone!(#[strong] home_log, move |l| log_line(&home_log, &l)),
+            clone!(#[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, move |code| {
                 set_buttons_sensitive(true);
                 toast(if code == 0 { "Mocktail updated" } else { "Update finished with errors" });
                 refresh_status();
@@ -1142,18 +1404,32 @@ fn build_home_page(
         );
     }));
 
-    btn_uninstall.connect_clicked(clone!(@strong window, @strong home_log, @strong toast,
-        @strong refresh_status, @strong set_buttons_sensitive => move |_| {
+    btn_uninstall.connect_clicked(clone!(#[strong] window, #[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, #[strong] state, move |_| {
+        let flavor = state.borrow().flavor;
+        let body = match flavor {
+            MocktailFlavor::Native => "This removes the native mocktail package (via your package manager). Your fflags.json and config.yaml are kept unless you also clear them in Advanced.".to_string(),
+            _ => "This removes the Mocktail flatpak. Your fflags.json and config.yaml are kept unless you also clear them in Advanced.".to_string(),
+        };
         confirm_dialog(&window, "Uninstall Mocktail?",
-            "This removes the Mocktail flatpak. Your fflags.json and config.yaml are kept unless you also clear them in Advanced.",
+            &body,
             "Uninstall", true,
-            clone!(@strong home_log, @strong toast, @strong refresh_status, @strong set_buttons_sensitive => move || {
+            clone!(#[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, #[strong] state, move || {
+                let flavor = state.borrow().flavor;
+                let argv = match flavor {
+                    MocktailFlavor::Native => match native_pkg_argv(PkgOp::Remove) {
+                        Some(argv) => argv,
+                        None => {
+                            toast("No supported package manager found — uninstall via your distro");
+                            return;
+                        }
+                    },
+                    _ => vec!["flatpak".into(), "uninstall".into(), "-y".into(), MOCKTAIL_APP_ID.into()],
+                };
                 set_buttons_sensitive(false);
-                log_line(&home_log, "$ flatpak uninstall -y space.bigrat.mocktail");
-                let argv = vec!["flatpak".into(), "uninstall".into(), "-y".into(), MOCKTAIL_APP_ID.into()];
+                log_line(&home_log, &format!("$ {}", argv.join(" ")));
                 run_streaming(argv,
-                    clone!(@strong home_log => move |l| log_line(&home_log, &l)),
-                    clone!(@strong toast, @strong refresh_status, @strong set_buttons_sensitive => move |code| {
+                    clone!(#[strong] home_log, move |l| log_line(&home_log, &l)),
+                    clone!(#[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, move |code| {
                         set_buttons_sensitive(true);
                         toast(if code == 0 { "Mocktail uninstalled" } else { "Uninstall finished with errors" });
                         refresh_status();
@@ -1162,8 +1438,6 @@ fn build_home_page(
             }),
         );
     }));
-
-    let _ = state; // state is used by other pages; home page only reads flatpak/mocktail status
 }
 
 // --------------------------------------------------------------------------
@@ -1257,7 +1531,7 @@ fn build_fflags_page(
                 let row = adw::EntryRow::builder().title(name.as_str()).build();
                 row.set_text(&value_str);
 
-                row.connect_apply(clone!(@strong state, @strong toast, @strong name => move |r| {
+                row.connect_apply(clone!(#[strong] state, #[strong] toast, #[strong] name, move |r| {
                     let mut s = state.borrow_mut();
                     s.fflags.insert(name.clone(), coerce_value(&r.text()));
                     drop(s);
@@ -1265,7 +1539,7 @@ fn build_fflags_page(
                 }));
 
                 let del_btn = gtk4::Button::builder().icon_name("user-trash-symbolic").css_classes(["flat"]).valign(gtk4::Align::Center).build();
-                del_btn.connect_clicked(clone!(@strong state, @strong refresh_list_holder, @strong name => move |_| {
+                del_btn.connect_clicked(clone!(#[strong] state, #[strong] refresh_list_holder, #[strong] name, move |_| {
                     state.borrow_mut().fflags.remove(&name);
                     if let Some(f) = refresh_list_holder.borrow().as_ref() {
                         f();
@@ -1285,8 +1559,7 @@ fn build_fflags_page(
 
     for (name, default, tip) in KNOWN_FFLAGS {
         let btn = gtk4::Button::builder().label(*name).css_classes(["flat"]).tooltip_text(*tip).build();
-        btn.connect_clicked(clone!(@strong state, @strong toast, @strong refresh_list
-            => move |_| {
+        btn.connect_clicked(clone!(#[strong] state, #[strong] toast, #[strong] refresh_list, move |_| {
             let mut s = state.borrow_mut();
             if s.fflags.contains_key(*name) {
                 drop(s);
@@ -1303,7 +1576,7 @@ fn build_fflags_page(
 
     for (name, preset) in presets() {
         let btn = gtk4::Button::builder().label(name).css_classes(["pill"]).build();
-        btn.connect_clicked(clone!(@strong state, @strong toast, @strong refresh_list => move |_| {
+        btn.connect_clicked(clone!(#[strong] state, #[strong] toast, #[strong] refresh_list, move |_| {
             let mut s = state.borrow_mut();
             for (k, v) in preset.iter() {
                 s.fflags.insert(k.clone(), v.clone());
@@ -1315,7 +1588,7 @@ fn build_fflags_page(
         preset_flow.append(&btn);
     }
 
-    add_btn.connect_clicked(clone!(@strong window, @strong state, @strong refresh_list => move |_| {
+    add_btn.connect_clicked(clone!(#[strong] window, #[strong] state, #[strong] refresh_list, move |_| {
         let dialog = adw::AlertDialog::builder().heading("Add Custom FastFlag").body("Flag names are case-sensitive.").build();
         let col = gtk4::Box::builder().orientation(gtk4::Orientation::Vertical).spacing(8).build();
         let name_entry = gtk4::Entry::builder().placeholder_text("e.g. DFIntTextureQualityOverride").build();
@@ -1326,8 +1599,7 @@ fn build_fflags_page(
         dialog.add_response("cancel", "Cancel");
         dialog.add_response("add", "Add");
         dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
-        dialog.connect_response(None, clone!(@strong state, @strong refresh_list, @strong name_entry, @strong value_entry
-            => move |_d, response| {
+        dialog.connect_response(None, clone!(#[strong] state, #[strong] refresh_list, #[strong] name_entry, #[strong] value_entry, move |_d, response| {
             if response == "add" {
                 let name = name_entry.text().trim().to_string();
                 let value = value_entry.text().trim().to_string();
@@ -1341,18 +1613,18 @@ fn build_fflags_page(
         dialog.present(Some(&window));
     }));
 
-    clear_btn.connect_clicked(clone!(@strong window, @strong state, @strong refresh_list => move |_| {
+    clear_btn.connect_clicked(clone!(#[strong] window, #[strong] state, #[strong] refresh_list, move |_| {
         confirm_dialog(&window, "Clear all FastFlags?",
             "This empties the in-memory list. Nothing is written to disk until you press Save.",
             "Clear", true,
-            clone!(@strong state, @strong refresh_list => move || {
+            clone!(#[strong] state, #[strong] refresh_list, move || {
                 state.borrow_mut().fflags.clear();
                 refresh_list();
             }),
         );
     }));
 
-    save_btn.connect_clicked(clone!(@strong state, @strong toast => move |_| {
+    save_btn.connect_clicked(clone!(#[strong] state, #[strong] toast, move |_| {
         let s = state.borrow();
         match save_fflags(&s.paths, &s.fflags) {
             Ok(_) => toast("Saved to fflags.json"),
@@ -1489,11 +1761,11 @@ fn build_textures_page(
     };
     refresh_counts();
 
-    btn_refresh.connect_clicked(clone!(@strong refresh_counts => move |_| {
+    btn_refresh.connect_clicked(clone!(#[strong] refresh_counts, move |_| {
         refresh_counts();
     }));
 
-    open_row.connect_activated(clone!(@strong toast, @strong texture_dir => move |_| {
+    open_row.connect_activated(clone!(#[strong] toast, #[strong] texture_dir, move |_| {
         let _ = std::fs::create_dir_all(&texture_dir);
         let uri = format!("file://{}", texture_dir.display());
         if gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE).is_err() {
@@ -1501,8 +1773,7 @@ fn build_textures_page(
         }
     }));
 
-    btn_import.connect_clicked(clone!(@strong toast, @strong refresh_counts, @strong dump_dir, @strong texture_dir
-        => move |_| {
+    btn_import.connect_clicked(clone!(#[strong] toast, #[strong] refresh_counts, #[strong] dump_dir, #[strong] texture_dir, move |_| {
         let mut imported = 0usize;
         if let Ok(entries) = std::fs::read_dir(&dump_dir) {
             let _ = std::fs::create_dir_all(&texture_dir);
@@ -1523,19 +1794,15 @@ fn build_textures_page(
         }
     }));
 
-    btn_dump_launch.connect_clicked(clone!(@strong toast, @strong tex_log, @strong refresh_counts,
-        @strong dump_dir, @strong btn_dump_launch => move |_| {
+    btn_dump_launch.connect_clicked(clone!(#[strong] toast, #[strong] tex_log, #[strong] refresh_counts, #[strong] dump_dir, #[strong] btn_dump_launch, #[strong] state, move |_| {
         btn_dump_launch.set_sensitive(false);
-        log_line(&tex_log, &format!("$ flatpak run --env=MOCKTAIL_TEXTURE_DUMP_DIR={} {}", dump_dir.display(), MOCKTAIL_APP_ID));
-        let argv = vec![
-            "flatpak".into(),
-            "run".into(),
-            format!("--env=MOCKTAIL_TEXTURE_DUMP_DIR={}", dump_dir.display()),
-            MOCKTAIL_APP_ID.into(),
-        ];
+        // Re-read the flavor at click time — the user may have installed
+        // Mocktail after this page was built.
+        let argv = launch_argv(state.borrow().flavor, Some(dump_dir.as_path()));
+        log_line(&tex_log, &format!("$ {}", argv.join(" ")));
         run_streaming(argv,
-            clone!(@strong tex_log => move |l| log_line(&tex_log, &l)),
-            clone!(@strong toast, @strong refresh_counts, @strong btn_dump_launch => move |code| {
+            clone!(#[strong] tex_log, move |l| log_line(&tex_log, &l)),
+            clone!(#[strong] toast, #[strong] refresh_counts, #[strong] btn_dump_launch, move |code| {
                 btn_dump_launch.set_sensitive(true);
                 if code == 0 {
                     toast("Mocktail closed — pick textures to import below");
@@ -1618,8 +1885,7 @@ fn build_settings_page(
     let save_btn = gtk4::Button::builder().label("Save Settings").css_classes(["suggested-action", "pill"]).halign(gtk4::Align::End).build();
     root.append(&save_btn);
 
-    save_btn.connect_clicked(clone!(@strong state, @strong toast, @strong row_backend, @strong row_hidpi,
-        @strong row_device, @strong row_theme => move |_| {
+    save_btn.connect_clicked(clone!(#[strong] state, #[strong] toast, #[strong] row_backend, #[strong] row_hidpi, #[strong] row_device, #[strong] row_theme, move |_| {
         let s = state.borrow();
         // Re-read the file so edits made in a text editor since the page
         // loaded aren't clobbered — yaml_set only touches our own keys.
@@ -1711,21 +1977,21 @@ fn build_advanced_page(
 
     stack.add_titled_with_icon(&page_scroller(&root), Some("advanced"), "Advanced", "applications-engineering-symbolic");
 
-    r1.connect_activated(clone!(@strong toast, @strong config_dir => move |_| {
+    r1.connect_activated(clone!(#[strong] toast, #[strong] config_dir, move |_| {
         let _ = std::fs::create_dir_all(&config_dir);
         let uri = format!("file://{}", config_dir.display());
         if gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE).is_err() {
             toast("Couldn't open folder");
         }
     }));
-    r2.connect_activated(clone!(@strong toast, @strong data_dir => move |_| {
+    r2.connect_activated(clone!(#[strong] toast, #[strong] data_dir, move |_| {
         let _ = std::fs::create_dir_all(&data_dir);
         let uri = format!("file://{}", data_dir.display());
         if gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE).is_err() {
             toast("Couldn't open folder");
         }
     }));
-    r_instances.connect_activated(clone!(@strong toast => move |_| {
+    r_instances.connect_activated(clone!(#[strong] toast, move |_| {
         let dir = instances_dir();
         let _ = std::fs::create_dir_all(&dir);
         let uri = format!("file://{}", dir.display());
@@ -1734,10 +2000,10 @@ fn build_advanced_page(
         }
     }));
 
-    r3.connect_activated(clone!(@strong window, @strong toast, @strong adv_log, @strong texture_overrides, @strong texture_dumps => move |_| {
+    r3.connect_activated(clone!(#[strong] window, #[strong] toast, #[strong] adv_log, #[strong] texture_overrides, #[strong] texture_dumps, move |_| {
         let body = format!("This deletes:\n{}\n{}", texture_overrides.display(), texture_dumps.display());
         confirm_dialog(&window, "Clear texture overrides?", &body, "Clear", true,
-            clone!(@strong toast, @strong adv_log, @strong texture_overrides, @strong texture_dumps => move || {
+            clone!(#[strong] toast, #[strong] adv_log, #[strong] texture_overrides, #[strong] texture_dumps, move || {
                 let mut cleared = false;
                 for dir in [&texture_overrides, &texture_dumps] {
                     if dir.exists() {
@@ -1755,12 +2021,11 @@ fn build_advanced_page(
         );
     }));
 
-    r4.connect_activated(clone!(@strong window, @strong state, @strong toast, @strong adv_log,
-        @strong fflags_file, @strong settings_file => move |_| {
+    r4.connect_activated(clone!(#[strong] window, #[strong] state, #[strong] toast, #[strong] adv_log, #[strong] fflags_file, #[strong] settings_file, move |_| {
         confirm_dialog(&window, "Reset FFlags & config?",
             "This deletes fflags.json and config.yaml. Mocktail will regenerate defaults on next launch.",
             "Reset", true,
-            clone!(@strong state, @strong toast, @strong adv_log, @strong fflags_file, @strong settings_file => move || {
+            clone!(#[strong] state, #[strong] toast, #[strong] adv_log, #[strong] fflags_file, #[strong] settings_file, move || {
                 for f in [&fflags_file, &settings_file] {
                     if f.exists() {
                         let _ = std::fs::remove_file(f);

@@ -1391,13 +1391,16 @@ fn build_home_page(
                             btn_uninstall.set_sensitive(true);
                         }
                         MocktailFlavor::None => {
-                            if flatpak_present() {
-                                status_row.set_title("Mocktail is not installed");
-                                status_row.set_subtitle("Install it from Flathub to get started");
+                            // Mirror the Install button's priority: native
+                            // package first, flatpak only as a last resort.
+                            status_row.set_title("Mocktail is not installed");
+                            status_row.set_subtitle(if native_pkg_argv(PkgOp::Install).is_some() {
+                                "Install it from your distro's package manager to get started"
+                            } else if flatpak_present() {
+                                "Install it from Flathub to get started"
                             } else {
-                                status_row.set_title("Mocktail is not installed");
-                                status_row.set_subtitle("Install it via Flatpak or your distro's package manager");
-                            }
+                                "Install it via your distro's package manager or Flatpak"
+                            });
                             status_icon.set_icon_name(Some("dialog-information-symbolic"));
                             btn_launch.set_visible(false);
                             btn_install.set_visible(true);
@@ -1569,13 +1572,15 @@ fn build_home_page(
         }
     }));
 
-    btn_install.connect_clicked(clone!(#[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, #[strong] state, move |_| {
-        let flavor = state.borrow().flavor;
-        // Not installed: use whichever route is available — native package
-        // first when flatpak isn't even present, else the Flathub flatpak.
+    btn_install.connect_clicked(clone!(#[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, move |_| {
+        // Not installed: prefer the distro's native package (AUR helper,
+        // dnf/yum, pacman, zypper, apt-get, apk, xbps) — it's lighter and
+        // integrates with the rest of the system. The Flathub flatpak is
+        // only a last resort, used when no supported package manager is
+        // found.
         let argv = match native_pkg_argv(PkgOp::Install) {
-            Some(argv) if (flavor == MocktailFlavor::Native || !flatpak_present()) => argv,
-            _ => vec!["flatpak".into(), "install".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()],
+            Some(argv) => argv,
+            None => vec!["flatpak".into(), "install".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()],
         };
         set_buttons_sensitive(false);
         log_line(&home_log, &format!("$ {}", argv.join(" ")));

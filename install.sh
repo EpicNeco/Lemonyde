@@ -23,12 +23,12 @@ AUTO_RUST="${LEMONYDE_NO_RUST:+0}"
 AUTO_RUST="${AUTO_RUST:-1}"
 AUTO_FLATPAK="${LEMONYDE_NO_FLATPAK:+0}"
 AUTO_FLATPAK="${AUTO_FLATPAK:-1}"
-INSTALL_SOBER_PROMPT=1
+INSTALL_MOCKTAIL_PROMPT=1
 INTERACTIVE=0
 SRC_DIR_OVERRIDE="${LEMONYDE_SRC_DIR:-}"
 
-if [[ -n "${LEMONYDE_NO_SOBER:-}" ]]; then
-  INSTALL_SOBER_PROMPT=0
+if [[ -n "${LEMONYDE_NO_MOCKTAIL:-}" || -n "${LEMONYDE_NO_SOBER:-}" ]]; then
+  INSTALL_MOCKTAIL_PROMPT=0
 fi
 
 usage() {
@@ -43,17 +43,19 @@ Options:
                    the default, so this is a no-op)
   -i, --interactive
                    Ask before each install step instead of just doing it
-  --no-sober       Don't install Sober via Flatpak at the end
+  --no-mocktail    Don't auto-install Mocktail at the end (Flatpak or native)
+                   (alias: --no-sober)
   --no-deps        Don't auto-install GTK4/libadwaita dev packages (fail if missing)
   --no-rust        Don't auto-install Rust via rustup (fail if cargo missing)
-  --no-flatpak     Don't auto-install Flatpak (Sober install will be skipped)
+  --no-flatpak     Don't auto-install Flatpak (used only when Mocktail
+                   isn't already installed natively)
   --repo URL       Git repo to clone when no local checkout is found
   --ref REF        Branch/tag to clone (default: repo default branch)
   -h, --help       Show this help
 Env:
   LEMONYDE_REPO, LEMONYDE_REF, LEMONYDE_SRC_DIR, LEMONYDE_INSTALL_DIR,
   LEMONYDE_BIN_DIR, LEMONYDE_DESKTOP_DIR, LEMONYDE_ICON_DIR,
-  LEMONYDE_NO_SOBER=1, LEMONYDE_NO_DEPS=1, LEMONYDE_NO_RUST=1,
+  LEMONYDE_NO_MOCKTAIL=1, LEMONYDE_NO_DEPS=1, LEMONYDE_NO_RUST=1,
   LEMONYDE_NO_FLATPAK=1
 USAGE
 }
@@ -62,7 +64,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -y|--yes) shift ;; 
     -i|--interactive) INTERACTIVE=1; shift ;;
-    --no-sober) INSTALL_SOBER_PROMPT=0; shift ;;
+    --no-mocktail|--no-sober) INSTALL_MOCKTAIL_PROMPT=0; shift ;;
     --no-deps) AUTO_DEPS=0; shift ;;
     --no-rust) AUTO_RUST=0; shift ;;
     --no-flatpak) AUTO_FLATPAK=0; shift ;;
@@ -440,25 +442,36 @@ else
   info "Found GTK4 + libadwaita dev files."
 fi
 
-# 3. Flatpak + Flathub (needed to install/run Sober itself) — auto-install.
-if ! need_cmd flatpak; then
+# 3. Flatpak + Flathub (only needed when Mocktail comes from Flatpak) —
+#    auto-install unless the user already has a native Mocktail package
+#    (distro repo / AUR — a `mocktail` binary on PATH) or --no-flatpak.
+MOCKTAIL_FLAVOR="none"
+if need_cmd flatpak && flatpak info space.bigrat.mocktail >/dev/null 2>&1; then
+  MOCKTAIL_FLAVOR="flatpak"
+elif need_cmd mocktail; then
+  MOCKTAIL_FLAVOR="native"
+fi
+
+if [[ "${MOCKTAIL_FLAVOR}" == "native" ]]; then
+  info "Detected native Mocktail package ($(command -v mocktail)) — Flatpak setup not needed."
+elif ! need_cmd flatpak; then
   if [[ "${AUTO_FLATPAK}" != "1" ]]; then
     c_yellow "Flatpak isn't installed (auto-install disabled via --no-flatpak)."
-    c_yellow "Lemonyde can still open, but it can't install/launch Sober."
+    c_yellow "Lemonyde can still open, but it can't install/launch the Flatpak build of Mocktail."
     echo "See https://flatpak.org/setup/ for instructions for your distro."
   else
     c_yellow "Flatpak isn't installed — installing automatically…"
     if try_install_pkg flatpak "Flatpak"; then
       c_green "Flatpak installed."
     else
-      c_yellow "Lemonyde can still open, but it can't install/launch Sober."
+      c_yellow "Lemonyde can still open, but it can't install/launch the Flatpak build of Mocktail."
       echo "See https://flatpak.org/setup/ for instructions for your distro."
     fi
   fi
 fi
-if need_cmd flatpak; then
+if [[ "${MOCKTAIL_FLAVOR}" != "native" ]] && need_cmd flatpak; then
   if ! flatpak remote-list 2>/dev/null | grep -qi '^flathub[[:space:]]'; then
-    c_yellow "Adding the Flathub remote (needed to install Sober)…"
+    c_yellow "Adding the Flathub remote (needed to install Mocktail)…"
     flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo \
       || c_yellow "Warning: could not add the Flathub remote. You can add it later; see https://flatpak.org/setup/."
   fi
@@ -502,22 +515,56 @@ fi
 
 c_green "Done!"
 echo
-# 6. Sober itself — auto-install, no prompt (unless --no-sober).
-if [[ "${INSTALL_SOBER_PROMPT}" == "1" ]]; then
-  if ! need_cmd flatpak; then
-    c_yellow "Skipping Sober install: Flatpak isn't available."
-  elif flatpak info org.vinegarhq.Sober >/dev/null 2>&1; then
-    info "Sober is already installed."
+# 6. Mocktail itself — auto-install, no prompt (unless --no-mocktail).
+#    Respects whichever flavor the user already has (flatpak or native) and
+#    picks a sensible route when neither is installed.
+mocktail_native_install() {
+  # Prefer an AUR helper on Arch-likes — Mocktail lives in the AUR there.
+  local helper=""
+  if need_cmd paru; then helper="paru"
+  elif need_cmd yay; then helper="yay"
+  fi
+  if [[ -n "${helper}" ]]; then
+    "${helper}" -S --needed --noconfirm mocktail
+    return $?
+  fi
+  pkg_install mocktail
+}
+
+if [[ "${INSTALL_MOCKTAIL_PROMPT}" != "1" ]]; then
+  info "Skipping Mocktail install (--no-mocktail)."
+elif [[ "${MOCKTAIL_FLAVOR}" == "flatpak" ]]; then
+  info "Mocktail is already installed (Flatpak: space.bigrat.mocktail)."
+elif [[ "${MOCKTAIL_FLAVOR}" == "native" ]]; then
+  info "Mocktail is already installed (native package: $(command -v mocktail))."
+elif need_cmd flatpak; then
+  # No Mocktail anywhere, but Flatpak is available — Flathub is upstream's
+  # recommended route.
+  if [[ "${INTERACTIVE}" == "1" ]]; then
+    if ask "Mocktail isn't installed yet — install it now via Flathub?"; then
+      flatpak install --user -y flathub space.bigrat.mocktail \
+        || c_yellow "Warning: Mocktail install failed. You can install it later with: flatpak install --user -y flathub space.bigrat.mocktail"
+    fi
+  else
+    c_blue "→ Installing Mocktail via Flathub (automatic)…"
+    flatpak install --user -y flathub space.bigrat.mocktail \
+      || c_yellow "Warning: Mocktail install failed. You can install it later with: flatpak install --user -y flathub space.bigrat.mocktail"
+  fi
+else
+  # No Flatpak — try the distro's package manager for a native build.
+  MGR="$(detect_pkg_mgr)"
+  if [[ -z "${MGR}" ]] && ! need_cmd paru && ! need_cmd yay; then
+    c_yellow "No Flatpak and no supported package manager found — install Mocktail manually."
   else
     if [[ "${INTERACTIVE}" == "1" ]]; then
-      if ask "Sober isn't installed yet — install it now via Flathub?"; then
-        flatpak install --user -y flathub org.vinegarhq.Sober \
-          || c_yellow "Warning: Sober install failed. You can install it later with: flatpak install --user flathub org.vinegarhq.Sober"
+      if ask "Flatpak isn't available — install Mocktail natively via your package manager?"; then
+        mocktail_native_install \
+          || c_yellow "Warning: native Mocktail install failed (it may not exist in your repos — e.g. the AUR needs paru/yay)."
       fi
     else
-      c_blue "→ Installing Sober via Flathub (automatic)…"
-      flatpak install --user -y flathub org.vinegarhq.Sober \
-        || c_yellow "Warning: Sober install failed. You can install it later with: flatpak install --user flathub org.vinegarhq.Sober"
+      c_blue "→ Installing Mocktail natively (automatic)…"
+      mocktail_native_install \
+        || c_yellow "Warning: native Mocktail install failed (it may not exist in your repos — e.g. the AUR needs paru/yay)."
     fi
   fi
 fi

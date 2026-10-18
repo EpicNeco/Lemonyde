@@ -11,7 +11,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::thread;
@@ -135,15 +135,35 @@ impl Paths {
 // Multi-instance support
 //
 // Running a second Mocktail with the same $HOME makes both instances fight
-// over the same config, Roblox payload, and login data. The fix is to give
-// each extra instance its own fake $HOME (plus XDG_* redirection for native
-// builds — see `spawn_slot_process`), so each slot gets a completely separate
-// config (config/mocktail), data (data/mocktail), and login session.
+// over the same config, Roblox payload, and login data. On top of that,
+// Mocktail takes an exclusive per-user instance lock whose key is derived
+// from the resolved path of its own executable, so a plain second launch
+// dies instantly with "Mocktail is already running for this user". Each
+// extra instance therefore gets a slot directory of its own, holding:
+//
+//   * a fake $HOME with XDG_* redirected into it, so config (config/
+//     mocktail), data (data/mocktail), and the login session are private
+//     to the slot;
+//   * its own copy of the mocktail executable (plus symlinks to the real
+//     shim libraries) — the per-slot executable path gives the instance
+//     lock a distinct key, so slots don't trip each other's "already
+//     running" guard (see `prepare_native_launcher`);
+//   * a payload store seeded with hardlinks from the main one, so a first
+//     launch doesn't re-download gigabytes of Roblox files
+//     (see `seed_slot`).
 //
 // Note: Mocktail's own FAQ declines to support multi-instance launching;
 // this is Lemonyde doing it from the outside. Roblox's ToS prohibit running
 // multiple clients — the warning banner on the Home page applies.
 // --------------------------------------------------------------------------
+
+/// Events streaming back out of a launched slot process: forwarded output
+/// lines for the activity log, launch failures, and process exit.
+enum SlotEvent {
+    Log(u32, String),
+    Failed(u32, String),
+    Exited(u32),
+}
 
 fn real_home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
@@ -174,39 +194,187 @@ fn slot_home(n: u32) -> PathBuf {
 /// Spawns Mocktail inside isolated instance slot `n`. Returns the child process
 /// handle so the caller can track it (and detect when it exits) rather than
 /// firing-and-forgetting — a double launch into the same slot would have both
-/// processes sharing one config/data tree.
+/// processes sharing one config/data tree. stdout/stderr are piped so the
+/// caller can forward slot output into the activity log (a slot that dies
+/// with a `[FATAL]` should be visible, not silent).
 ///
-/// Flatpak: only HOME is faked (Flatpak resolves the app's private
-/// `~/.var/app/<id>` inside the sandbox); XDG_* stay real so the `flatpak`
-/// command can still find the installed app under the real user's
-/// `~/.local/share/flatpak`.
+/// Native: HOME *and* XDG_* are redirected into the slot, and Mocktail is
+/// run from a per-slot copy of the executable (see `prepare_native_launcher`)
+/// so its instance-lock key differs from every other instance's.
 ///
-/// Native: HOME *and* XDG_* are redirected into the slot, since a native
-/// build reads `$XDG_CONFIG_HOME/mocktail` and friends directly.
+/// Flatpak: each `flatpak run` gets its own sandbox mount namespace, so the
+/// instance lock (which lives in the sandbox's private XDG_RUNTIME_DIR)
+/// never collides between instances. The shared state that *would* collide
+/// is `~/.var/app/<id>` (Flatpak's per-app config/data, identical for every
+/// instance of the same app), so the slot's directory is mounted into the
+/// sandbox with `--filesystem` and HOME/XDG_* are pointed at it via
+/// `--env=`. The `flatpak` CLI itself still gets the *real* XDG_* values so
+/// it can locate the user's installation.
 fn spawn_slot_process(n: u32, flavor: MocktailFlavor) -> std::io::Result<std::process::Child> {
     let home = slot_home(n);
     std::fs::create_dir_all(&home)?;
+    seed_slot(&home, flavor);
     let mut cmd = match flavor {
         MocktailFlavor::Native => {
-            let mut cmd = Command::new("mocktail");
+            prepare_native_launcher(&home)?;
+            let mut cmd = Command::new(home.join("bin/mocktail"));
             cmd.env("XDG_CONFIG_HOME", home.join(".config"))
                 .env("XDG_DATA_HOME", home.join(".local/share"))
-                .env("XDG_CACHE_HOME", home.join(".cache"));
+                .env("XDG_CACHE_HOME", home.join(".cache"))
+                .env("XDG_STATE_HOME", home.join(".local/state"));
             cmd
         }
         _ => {
             let mut cmd = Command::new("flatpak");
             cmd.env("XDG_DATA_HOME", xdg_data_home())
                 .env("XDG_CONFIG_HOME", xdg_config_home())
-                .env("XDG_CACHE_HOME", xdg_cache_home())
-                .args(["run", MOCKTAIL_APP_ID]);
+                .env("XDG_CACHE_HOME", xdg_cache_home());
+            cmd.args([
+                "run".to_string(),
+                format!("--filesystem={}", home.display()),
+                format!("--env=HOME={}", home.display()),
+                format!("--env=XDG_CONFIG_HOME={}", home.join(".config").display()),
+                format!("--env=XDG_DATA_HOME={}", home.join(".local/share").display()),
+                format!("--env=XDG_CACHE_HOME={}", home.join(".cache").display()),
+                format!("--env=XDG_STATE_HOME={}", home.join(".local/state").display()),
+                MOCKTAIL_APP_ID.to_string(),
+            ]);
             cmd
         }
     };
     cmd.env("HOME", &home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
+}
+
+/// Locates the real native `mocktail` executable through $PATH.
+fn find_native_mocktail() -> Option<PathBuf> {
+    let out = Command::new("which").arg("mocktail").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if path.is_empty() { None } else { Some(PathBuf::from(path)) }
+}
+
+/// Sets up `slot-home/bin/` so Mocktail can run from inside the slot:
+///
+///  * a fresh copy (hardlink when the filesystem allows it, else a byte
+///    copy — it's only a few MB) of the real executable, refreshed when the
+///    package updates. Mocktail derives its per-user instance-lock key from
+///    the resolved path of its own executable, so each slot binary gets a
+///    distinct key and two slots never trigger each other's "already
+///    running" guard;
+///  * `slot-home/lib/mocktail` as a symlink to the real library directory —
+///    the executable's RUNPATH is `$ORIGIN:$ORIGIN/../lib/mocktail`, so its
+///    regular library dependencies resolve through this link;
+///  * every `*.so*` from that directory symlinked next to the slot binary —
+///    when Mocktail doesn't recognize its own install layout (a non-system
+///    exe path reports `package=local-build`) it probes for its Bionic EGL
+///    adapter at `<exe_dir>/libEGL.so` and hard-fails without it.
+fn prepare_native_launcher(home: &Path) -> std::io::Result<()> {
+    let exe = std::fs::canonicalize(
+        find_native_mocktail().ok_or_else(|| std::io::Error::other("couldn't find `mocktail` on PATH"))?,
+    )?;
+    let bin_dir = home.join("bin");
+    let lib_dir = home.join("lib");
+    std::fs::create_dir_all(&bin_dir)?;
+    std::fs::create_dir_all(&lib_dir)?;
+
+    let src_meta = std::fs::metadata(&exe)?;
+    let slot_exe = bin_dir.join("mocktail");
+    let stale = match std::fs::metadata(&slot_exe) {
+        // Refresh the copy when the package was updated (size or mtime
+        // differ) so slots don't keep running an old version.
+        Ok(m) => m.len() != src_meta.len() || m.modified().ok() < src_meta.modified().ok(),
+        Err(_) => true,
+    };
+    if stale {
+        let _ = std::fs::remove_file(&slot_exe);
+        if std::fs::hard_link(&exe, &slot_exe).is_err() {
+            // Hardlinking a root-owned file is blocked by
+            // fs.protected_hardlinks; a copy works everywhere.
+            std::fs::copy(&exe, &slot_exe)?;
+        }
+    }
+
+    let real_lib = exe
+        .parent()
+        .and_then(Path::parent)
+        .map(|prefix| prefix.join("lib/mocktail"))
+        .unwrap_or_else(|| PathBuf::from("/usr/lib/mocktail"));
+    if real_lib.is_dir() {
+        let link = lib_dir.join("mocktail");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&real_lib, &link)?;
+        for entry in std::fs::read_dir(&real_lib)? {
+            let entry = entry?;
+            if !entry.file_name().to_string_lossy().contains(".so") {
+                continue;
+            }
+            let dst = bin_dir.join(entry.file_name());
+            let _ = std::fs::remove_file(&dst);
+            std::os::unix::fs::symlink(entry.path(), &dst)?;
+        }
+    }
+    Ok(())
+}
+
+/// Copies the main instance's Roblox payload store and base config into a
+/// fresh slot so its first launch doesn't re-download ~1.3 GB of payloads.
+/// Payload directories are content-addressed and read-only, so they're
+/// shared with hardlinks for free; each file falls back to a copy across
+/// filesystems. Runs only when the slot hasn't been seeded yet — later
+/// payload downloads and updates stay private to the slot, and no auth /
+/// login data is ever copied (per-slot sign-in is the point).
+fn seed_slot(home: &Path, flavor: MocktailFlavor) {
+    let main = Paths::new(flavor);
+
+    let slot_data = home.join(".local/share/mocktail");
+    if !slot_data.exists() && main.data_dir.is_dir() {
+        for item in ["payloads", "rbx_bin", "current.json"] {
+            let src = main.data_dir.join(item);
+            if src.exists() {
+                if let Err(e) = copy_tree_hardlinks(&src, &slot_data.join(item)) {
+                    eprintln!("lemonyde: seeding {} into {}: {e}", src.display(), slot_data.display());
+                }
+            }
+        }
+    }
+
+    let slot_config = home.join(".config/mocktail");
+    let _ = std::fs::create_dir_all(&slot_config);
+    for file in ["fflags.json", "config.yaml"] {
+        let dst = slot_config.join(file);
+        if !dst.exists() {
+            let _ = std::fs::copy(main.config_dir.join(file), &dst);
+        }
+    }
+}
+
+/// Recursive copy that hardlinks regular files where possible (payload
+/// stores are shared between slots this way) and falls back to a real copy
+/// — same filesystem, or fs.protected_hardlinks refusing links to files we
+/// don't own. Symlinks are recreated as symlinks.
+fn copy_tree_hardlinks(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let meta = std::fs::symlink_metadata(src)?;
+    let file_type = meta.file_type();
+    if file_type.is_symlink() {
+        let target = std::fs::read_link(src)?;
+        let _ = std::fs::remove_file(dst);
+        return std::os::unix::fs::symlink(target, dst);
+    }
+    if file_type.is_dir() {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            copy_tree_hardlinks(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(dst);
+    std::fs::hard_link(src, dst).or_else(|_| std::fs::copy(src, dst).map(|_| ()))
 }
 
 fn load_fflags(paths: &Paths) -> Map<String, Value> {
@@ -945,6 +1113,16 @@ fn confirm_dialog(
 
 fn log_line(view: &gtk4::TextView, text: &str) {
     let buf = view.buffer();
+    // Keep the log bounded: while instances run, slot output streams in
+    // continuously and an unbounded buffer would grow forever.
+    const MAX_LINES: i32 = 4000;
+    let line_count = buf.line_count();
+    if line_count > MAX_LINES {
+        let mut start = buf.start_iter();
+        let mut end = start;
+        end.forward_lines(line_count - MAX_LINES);
+        buf.delete(&mut start, &mut end);
+    }
     let mut end = buf.end_iter();
     buf.insert(&mut end, &format!("{text}\n"));
     let mark = buf.create_mark(None, &buf.end_iter(), false);
@@ -1266,17 +1444,37 @@ fn build_home_page(
     // Tracks which slots we've personally launched and not yet seen exit, so
     // a click on "Launch Instances" never spawns a second process into a
     // slot that's already running — a double launch would have both copies
-    // of Mocktail fighting over one config/data tree.
+    // of Mocktail fighting over one config/data tree. Slot processes are
+    // prepared and spawned on worker threads (seeding a slot's payload
+    // store can touch a lot of files), so slot events arrive over a channel
+    // and are applied here on the main thread.
     let active_slots: Rc<RefCell<HashSet<u32>>> = Rc::new(RefCell::new(HashSet::new()));
-    let (exit_tx, exit_rx) = async_channel::unbounded::<u32>();
+    let (slot_tx, slot_rx) = async_channel::unbounded::<SlotEvent>();
 
     glib::spawn_future_local(clone!(#[strong] active_slots, #[strong] home_log, #[strong] refresh_running, async move {
-        while let Ok(n) = exit_rx.recv().await {
-            active_slots.borrow_mut().remove(&n);
-            log_line(&home_log, &format!("Slot {n} closed — free to relaunch"));
-            refresh_running();
+        while let Ok(ev) = slot_rx.recv().await {
+            match ev {
+                SlotEvent::Log(n, line) => log_line(&home_log, &format!("[slot {n}] {line}")),
+                SlotEvent::Failed(n, e) => {
+                    active_slots.borrow_mut().remove(&n);
+                    log_line(&home_log, &format!("Slot {n} failed to launch: {e}"));
+                }
+                SlotEvent::Exited(n) => {
+                    active_slots.borrow_mut().remove(&n);
+                    log_line(&home_log, &format!("Slot {n} closed — free to relaunch"));
+                    refresh_running();
+                }
+            }
         }
     }));
+
+    fn forward_slot_output<R: std::io::Read + Send + 'static>(reader: R, n: u32, tx: async_channel::Sender<SlotEvent>) {
+        for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            if tx.send_blocking(SlotEvent::Log(n, line)).is_err() {
+                break;
+            }
+        }
+    }
 
     fn launch_step(
         i: u32,
@@ -1284,7 +1482,7 @@ fn build_home_page(
         flavor: MocktailFlavor,
         home_log: gtk4::TextView,
         active_slots: Rc<RefCell<HashSet<u32>>>,
-        exit_tx: async_channel::Sender<u32>,
+        slot_tx: async_channel::Sender<SlotEvent>,
         refresh_running: Rc<dyn Fn()>,
     ) {
         if i > n {
@@ -1294,29 +1492,41 @@ fn build_home_page(
         if already_running {
             log_line(&home_log, &format!("Slot {i} is already running — close it before relaunching, skipping"));
         } else {
-            match spawn_slot_process(i, flavor) {
-                Ok(child) => {
-                    active_slots.borrow_mut().insert(i);
-                    log_line(&home_log, &format!("Slot {i} launched — complete its one-time sign-in/setup, it'll go straight to Roblox next time"));
-                    let exit_tx = exit_tx.clone();
-                    thread::spawn(move || {
-                        let mut child = child;
+            // Reserve the slot up front so a second click can't race us;
+            // a failed launch releases it again through SlotEvent::Failed.
+            active_slots.borrow_mut().insert(i);
+            let slot_tx = slot_tx.clone();
+            thread::spawn(move || {
+                match spawn_slot_process(i, flavor) {
+                    Ok(mut child) => {
+                        let _ = slot_tx.send_blocking(SlotEvent::Log(
+                            i,
+                            "launched — complete its one-time sign-in/setup, it'll go straight to Roblox next time".into(),
+                        ));
+                        if let Some(stdout) = child.stdout.take() {
+                            let tx = slot_tx.clone();
+                            thread::spawn(move || forward_slot_output(stdout, i, tx));
+                        }
+                        if let Some(stderr) = child.stderr.take() {
+                            let tx = slot_tx.clone();
+                            thread::spawn(move || forward_slot_output(stderr, i, tx));
+                        }
                         let _ = child.wait();
-                        let _ = exit_tx.send_blocking(i);
-                    });
+                        let _ = slot_tx.send_blocking(SlotEvent::Exited(i));
+                    }
+                    Err(e) => {
+                        let _ = slot_tx.send_blocking(SlotEvent::Failed(i, e.to_string()));
+                    }
                 }
-                Err(e) => {
-                    log_line(&home_log, &format!("Slot {i} failed to launch: {e}"));
-                }
-            }
+            });
         }
         if i < n {
             let home_log = home_log.clone();
             let active_slots = active_slots.clone();
-            let exit_tx = exit_tx.clone();
+            let slot_tx = slot_tx.clone();
             let refresh_running = refresh_running.clone();
             glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
-                launch_step(i + 1, n, flavor, home_log, active_slots, exit_tx, refresh_running);
+                launch_step(i + 1, n, flavor, home_log, active_slots, slot_tx, refresh_running);
             });
         } else {
             let refresh_running = refresh_running.clone();
@@ -1326,14 +1536,14 @@ fn build_home_page(
         }
     }
 
-    launch_multi_btn.connect_clicked(clone!(#[strong] toast, #[strong] home_log, #[strong] instances_spin, #[strong] refresh_running, #[strong] active_slots, #[strong] exit_tx, #[strong] state, move |_| {
+    launch_multi_btn.connect_clicked(clone!(#[strong] toast, #[strong] home_log, #[strong] instances_spin, #[strong] refresh_running, #[strong] active_slots, #[strong] slot_tx, #[strong] state, move |_| {
         let n = instances_spin.value() as u32;
         if n == 0 {
             return;
         }
         log_line(&home_log, &format!("$ launching up to {n} Mocktail instance(s)…"));
         toast(&format!("Launching up to {n} instance(s)…"));
-        launch_step(1, n, state.borrow().flavor, home_log.clone(), active_slots.clone(), exit_tx.clone(), refresh_running.clone());
+        launch_step(1, n, state.borrow().flavor, home_log.clone(), active_slots.clone(), slot_tx.clone(), refresh_running.clone());
     }));
 
     let set_buttons_sensitive = {

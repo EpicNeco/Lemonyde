@@ -1,14 +1,15 @@
-// Lemonyde — an unofficial community bootstrapper for the Sober flatpak
-// (Roblox on Linux, by VinegarHQ: https://sober.vinegarhq.org).
+// Lemonyde — an unofficial community bootstrapper for the Mocktail flatpak
+// (Roblox on Linux: https://mocktail.bigrat.space/).
 //
-// Not affiliated with Roblox Corporation or VinegarHQ. Provided as-is.
+// Not affiliated with Roblox Corporation or the Mocktail project authors.
+// Provided as-is.
 //
 // Rust + GTK4 + libadwaita rewrite of the original Python prototype.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::thread;
@@ -21,11 +22,15 @@ use adw::prelude::*;
 use serde_json::{Map, Value};
 
 const APP_ID: &str = "io.github.epicneco.Lemonyde";
-const SOBER_APP_ID: &str = "org.vinegarhq.Sober";
+const MOCKTAIL_APP_ID: &str = "space.bigrat.mocktail";
 
 /// Flags confirmed to be on Roblox's client-config allowlist as of the
 /// community-maintained guide at github.com/dyokism/sober-fastflags
 /// (accurate as of July 2026 — Roblox may change the allowlist at any time).
+///
+/// Compiled against Sober's PC-client allowlist; Mocktail runs the Android
+/// client behind a `pc-windows-11` device preset, so its allowlist may differ
+/// slightly. Unlisted flags are simply ignored by Roblox, never harmful.
 const KNOWN_FFLAGS: &[(&str, &str, &str)] = &[
     ("DFIntCSGLevelOfDetailSwitchingDistance", "400", "Master LOD culling distance for CSG models. Lower = better FPS."),
     ("DFIntCSGLevelOfDetailSwitchingDistanceL12", "200", "LOD distance for Graphics Quality 1-2."),
@@ -87,23 +92,31 @@ fn presets() -> Vec<(&'static str, Map<String, Value>)> {
 
 struct Paths {
     config_dir: PathBuf,
-    config_file: PathBuf,
     data_dir: PathBuf,
-    client_settings: PathBuf,
-    asset_overlay: PathBuf,
+    /// `config/mocktail/fflags.json` — flat object Mocktail merges into
+    /// Roblox's client settings on launch.
+    fflags_file: PathBuf,
+    /// `config/mocktail/config.yaml` — Mocktail's own settings file.
+    settings_file: PathBuf,
+    /// `config/mocktail/textures` — hash-named PNG texture overrides.
+    texture_overrides: PathBuf,
+    /// `config/mocktail/dumps` — where texture dumps land when Mocktail is
+    /// launched with `MOCKTAIL_TEXTURE_DUMP_DIR` set.
+    texture_dumps: PathBuf,
 }
 
 impl Paths {
     fn new() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let base = home.join(".var/app").join(SOBER_APP_ID);
-        let config_dir = base.join("config/sober");
-        let data_dir = base.join("data/sober");
+        let base = home.join(".var/app").join(MOCKTAIL_APP_ID);
+        let config_dir = base.join("config/mocktail");
+        let data_dir = base.join("data/mocktail");
         Paths {
-            config_file: config_dir.join("config.json"),
+            fflags_file: config_dir.join("fflags.json"),
+            settings_file: config_dir.join("config.yaml"),
+            texture_overrides: config_dir.join("textures"),
+            texture_dumps: config_dir.join("dumps"),
             config_dir,
-            client_settings: data_dir.join("exe/ClientSettings/ClientAppSettings.json"),
-            asset_overlay: data_dir.join("asset_overlay"),
             data_dir,
         }
     }
@@ -112,16 +125,20 @@ impl Paths {
 // --------------------------------------------------------------------------
 // Multi-instance support
 //
-// Sober enforces its own single-instance lock, so launching a second
-// `flatpak run org.vinegarhq.Sober` with the same $HOME crashes with
-// "An instance of Sober is already running." The fix (a well-known Flatpak
-// trick, not specific to Sober) is to give each extra instance its own
-// fake $HOME — Flatpak resolves an app's private data at $HOME/.var/app/<id>,
-// so a different $HOME means a completely separate lock file, config, and
-// login session. We keep XDG_DATA_HOME/XDG_CONFIG_HOME/XDG_CACHE_HOME
+// Running a second `flatpak run space.bigrat.mocktail` with the same $HOME
+// makes both instances fight over the same config, Roblox payload, and login
+// data. The fix (a well-known Flatpak trick, not specific to Mocktail) is to
+// give each extra instance its own fake $HOME — Flatpak resolves an app's
+// private data at $HOME/.var/app/<id>, so a different $HOME means a
+// completely separate config (config/mocktail), data (data/mocktail), and
+// login session per slot. We keep XDG_DATA_HOME/XDG_CONFIG_HOME/XDG_CACHE_HOME
 // pointed at their real locations so the `flatpak` command itself can still
 // find the installed app (which lives under the *real* user's
 // ~/.local/share/flatpak, untouched by the fake HOME).
+//
+// Note: Mocktail's own FAQ declines to support multi-instance launching;
+// this is Lemonyde doing it from the outside. Roblox's ToS prohibit running
+// multiple clients — the warning banner on the Home page applies.
 // --------------------------------------------------------------------------
 
 fn real_home() -> PathBuf {
@@ -145,15 +162,15 @@ fn instances_dir() -> PathBuf {
 }
 
 /// The isolated fake-$HOME directory for instance slot `n` (1-indexed).
-/// Reused across launches so a slot's Sober login persists between runs.
+/// Reused across launches so a slot's Mocktail login persists between runs.
 fn slot_home(n: u32) -> PathBuf {
     instances_dir().join(format!("slot-{n}"))
 }
 
-/// Spawns Sober inside isolated instance slot `n`. Returns the child process
+/// Spawns Mocktail inside isolated instance slot `n`. Returns the child process
 /// handle so the caller can track it (and detect when it exits) rather than
-/// firing-and-forgetting — launching into a slot that's already running is
-/// exactly what triggers Sober's "already running" / frozen-instance crash.
+/// firing-and-forgetting — a double launch into the same slot would have both
+/// processes sharing one config/data tree.
 fn spawn_slot_process(n: u32) -> std::io::Result<std::process::Child> {
     let home = slot_home(n);
     std::fs::create_dir_all(&home)?;
@@ -162,27 +179,204 @@ fn spawn_slot_process(n: u32) -> std::io::Result<std::process::Child> {
         .env("XDG_DATA_HOME", xdg_data_home())
         .env("XDG_CONFIG_HOME", xdg_config_home())
         .env("XDG_CACHE_HOME", xdg_cache_home())
-        .args(["run", SOBER_APP_ID])
+        .args(["run", MOCKTAIL_APP_ID])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
 }
 
-fn load_config(paths: &Paths) -> Map<String, Value> {
-    std::fs::read_to_string(&paths.config_file)
+fn load_fflags(paths: &Paths) -> Map<String, Value> {
+    std::fs::read_to_string(&paths.fflags_file)
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default()
 }
 
-fn save_config(paths: &Paths, cfg: &Map<String, Value>) -> std::io::Result<()> {
+fn save_fflags(paths: &Paths, fflags: &Map<String, Value>) -> std::io::Result<()> {
     std::fs::create_dir_all(&paths.config_dir)?;
-    if paths.config_file.exists() {
-        let _ = std::fs::copy(&paths.config_file, paths.config_file.with_extension("json.bak"));
+    if paths.fflags_file.exists() {
+        let _ = std::fs::copy(&paths.fflags_file, paths.fflags_file.with_extension("json.bak"));
     }
-    let text = serde_json::to_string_pretty(cfg).unwrap_or_default();
-    std::fs::write(&paths.config_file, text + "\n")
+    let text = serde_json::to_string_pretty(fflags).unwrap_or_default();
+    std::fs::write(&paths.fflags_file, text + "\n")
+}
+
+// ---- Minimal line-oriented YAML editing for Mocktail's config.yaml ----
+//
+// Mocktail creates config.yaml once (mode 0600) and never replaces the
+// user's edits, so we surgically replace individual `key: value` lines while
+// leaving comments and unrelated keys untouched. Only the plain mapping
+// shapes Mocktail itself writes are handled; anything unusual falls back to
+// appending a fresh section at the end of the file.
+
+/// Splits a line into `(indent, key, value-after-colon)` for plain mapping
+/// entries. Comment lines, blank lines, and list items yield `None`.
+fn yaml_line_key(line: &str) -> Option<(usize, &str, &str)> {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    let indent = line.len() - trimmed.len();
+    let (key, rest) = trimmed.split_once(':')?;
+    let key = key.trim();
+    if key.is_empty() || key.contains(' ') || key.starts_with('-') {
+        return None;
+    }
+    Some((indent, key, rest.trim()))
+}
+
+/// Strips a trailing `# comment` and surrounding quotes from a raw value.
+fn yaml_scalar(raw: &str) -> &str {
+    let before_comment = match raw.find('#') {
+        Some(i) if i == 0 || raw[..i].ends_with(' ') => &raw[..i],
+        _ => raw,
+    };
+    before_comment.trim().trim_matches(|c| c == '"' || c == '\'')
+}
+
+/// Locates the line index of the final `keys` entry (e.g. `["graphics",
+/// "backend"]`) in `lines`. Intermediate keys must be section headers.
+fn yaml_locate(lines: &[String], keys: &[&str]) -> Option<usize> {
+    let mut start = 0usize;
+    let mut end = lines.len();
+    let mut parent_indent: Option<usize> = None;
+    for (idx, key) in keys.iter().enumerate() {
+        let mut hit: Option<(usize, usize, String)> = None;
+        let mut i = start;
+        while i < end {
+            if let Some((indent, k, rest)) = yaml_line_key(&lines[i]) {
+                if let Some(pindent) = parent_indent {
+                    if indent <= pindent {
+                        break;
+                    }
+                }
+                if k == *key {
+                    hit = Some((i, indent, rest.to_string()));
+                    break;
+                }
+            }
+            i += 1;
+        }
+        let (line, indent, rest) = hit?;
+        let is_last = idx + 1 == keys.len();
+        if is_last {
+            return Some(line);
+        }
+        // Intermediate keys must be section headers (`key:` with no value).
+        if !yaml_scalar(&rest).is_empty() {
+            return None;
+        }
+        parent_indent = Some(indent);
+        start = line + 1;
+        let mut j = start;
+        while j < end {
+            if let Some((ind2, _, _)) = yaml_line_key(&lines[j]) {
+                if ind2 <= indent {
+                    break;
+                }
+            }
+            j += 1;
+        }
+        end = j;
+    }
+    None
+}
+
+fn yaml_get(text: &str, keys: &[&str]) -> Option<String> {
+    let lines: Vec<String> = text.lines().map(String::from).collect();
+    let line = yaml_locate(&lines, keys)?;
+    let (_, _, rest) = yaml_line_key(&lines[line])?;
+    let value = yaml_scalar(rest);
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn yaml_set(text: &str, keys: &[&str], value: &str) -> String {
+    if keys.is_empty() {
+        return text.to_string();
+    }
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    let last_key = keys.last().copied().unwrap_or("");
+
+    match yaml_locate(&lines, keys) {
+        Some(line) => {
+            let (indent, _, rest) = yaml_line_key(&lines[line]).unwrap_or((0, "", ""));
+            lines[line] = format!("{}{}: {}", " ".repeat(indent), last_key, value);
+            if yaml_scalar(rest).is_empty() {
+                // The key existed as a section (e.g. Mocktail's detailed
+                // `device:` map) — drop its children so we don't leave a
+                // half-orphaned mapping below the new scalar value.
+                let mut j = line + 1;
+                while j < lines.len() {
+                    match yaml_line_key(&lines[j]) {
+                        Some((ind, _, _)) if ind > indent => {
+                            lines.remove(j);
+                        }
+                        _ => break,
+                    }
+                }
+            }
+        }
+        None => {
+            // Deepest existing prefix of the key path, if any.
+            let mut prefix = keys.len() - 1;
+            while prefix > 0 && yaml_locate(&lines, &keys[..prefix]).is_none() {
+                prefix -= 1;
+            }
+            if prefix == 0 {
+                // No existing ancestor — append the whole path as a new section.
+                while lines.last().is_some_and(|l| l.trim().is_empty()) {
+                    lines.pop();
+                }
+                if !lines.is_empty() {
+                    lines.push(String::new());
+                }
+                for (i, key) in keys.iter().enumerate() {
+                    let indent = i * 2;
+                    let line = if i + 1 == keys.len() {
+                        format!("{}{}: {}", " ".repeat(indent), key, value)
+                    } else {
+                        format!("{}{}:", " ".repeat(indent), key)
+                    };
+                    lines.push(line);
+                }
+            } else {
+                // Parent section exists — nest the remaining keys inside it.
+                let parent_line = yaml_locate(&lines, &keys[..prefix]).unwrap();
+                let parent_indent = yaml_line_key(&lines[parent_line]).map(|(i, _, _)| i).unwrap_or(0);
+                let mut section_end = parent_line + 1;
+                while section_end < lines.len() {
+                    if let Some((ind, _, _)) = yaml_line_key(&lines[section_end]) {
+                        if ind <= parent_indent {
+                            break;
+                        }
+                    }
+                    section_end += 1;
+                }
+                let child_indent = (parent_line + 1..section_end)
+                    .find_map(|i| yaml_line_key(&lines[i]).map(|(ind, _, _)| ind))
+                    .filter(|ind| *ind > parent_indent)
+                    .unwrap_or(parent_indent + 2);
+                let mut insert = Vec::new();
+                for (i, key) in keys[prefix..].iter().enumerate() {
+                    let indent = child_indent + i * 2;
+                    if prefix + i + 1 == keys.len() {
+                        insert.push(format!("{}{}: {}", " ".repeat(indent), key, value));
+                    } else {
+                        insert.push(format!("{}{}:", " ".repeat(indent), key));
+                    }
+                }
+                for (offset, line) in insert.into_iter().enumerate() {
+                    lines.insert(section_end + offset, line);
+                }
+            }
+        }
+    }
+    lines.join("\n") + "\n"
 }
 
 fn coerce_value(text: &str) -> Value {
@@ -195,9 +389,8 @@ fn coerce_value(text: &str) -> Value {
     if let Ok(i) = t.parse::<i64>() {
         return Value::from(i);
     }
-    if let Ok(f) = t.parse::<f64>() {
-        return Value::from(f);
-    }
+    // No float parsing: Mocktail only accepts string/bool/int values in
+    // fflags.json — a single float rejects the entire file at load time.
     Value::String(t.to_string())
 }
 
@@ -216,16 +409,16 @@ fn flatpak_present() -> bool {
     Command::new("which").arg("flatpak").output().map(|o| o.status.success()).unwrap_or(false)
 }
 
-fn sober_installed() -> bool {
+fn mocktail_installed() -> bool {
     Command::new("flatpak")
-        .args(["info", SOBER_APP_ID])
+        .args(["info", MOCKTAIL_APP_ID])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
-fn sober_version() -> Option<String> {
-    let out = Command::new("flatpak").args(["info", SOBER_APP_ID]).output().ok()?;
+fn mocktail_version() -> Option<String> {
+    let out = Command::new("flatpak").args(["info", MOCKTAIL_APP_ID]).output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     for line in text.lines() {
         if let Some(rest) = line.trim().strip_prefix("Version:") {
@@ -235,7 +428,7 @@ fn sober_version() -> Option<String> {
     None
 }
 
-/// Counts how many sandboxed Sober processes are currently running, via
+/// Counts how many sandboxed Mocktail processes are currently running, via
 /// `flatpak ps`. Each `flatpak run` spawns its own sandbox instance, so
 /// this is also how we confirm a multi-instance launch actually took.
 fn running_instance_count() -> usize {
@@ -246,7 +439,7 @@ fn running_instance_count() -> usize {
         .map(|o| {
             String::from_utf8_lossy(&o.stdout)
                 .lines()
-                .filter(|l| l.trim() == SOBER_APP_ID)
+                .filter(|l| l.trim() == MOCKTAIL_APP_ID)
                 .count()
         })
         .unwrap_or(0)
@@ -339,7 +532,6 @@ fn run_streaming(
 struct AppState {
     paths: Paths,
     fflags: Map<String, Value>,
-    other: Map<String, Value>,
 }
 
 type SharedState = Rc<RefCell<AppState>>;
@@ -545,96 +737,6 @@ fn log_line(view: &gtk4::TextView, text: &str) {
     view.scroll_mark_onscreen(&mark);
 }
 
-/// Opens a native file picker and copies whatever local file the user
-/// selects to `dest` (creating parent directories as needed). Used by the
-/// Customize page for font asset_overlay overrides. Silently does nothing
-/// if the user cancels.
-fn pick_and_copy_file(
-    window: &adw::ApplicationWindow,
-    title: &str,
-    dest: PathBuf,
-    on_done: impl Fn(Result<(), String>) + 'static,
-) {
-    let dialog = gtk4::FileDialog::builder().title(title).build();
-    dialog.open(Some(window), gio::Cancellable::NONE, move |result| {
-        let Ok(file) = result else { return };
-        let Some(src) = file.path() else {
-            on_done(Err("Only local files are supported".into()));
-            return;
-        };
-        if let Some(parent) = dest.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let result = std::fs::copy(&src, &dest).map(|_| ()).map_err(|e| e.to_string());
-        on_done(result);
-    });
-}
-
-/// Normalizes an arbitrary source image into the format Roblox actually
-/// expects for a cursor override: a 64×64 transparent-canvas PNG (the
-/// dimensions Bloxstrap's own modding docs confirm for ArrowCursor /
-/// ArrowFarCursor). Without this, cursors picked at different source
-/// resolutions render at inconsistent sizes in-game relative to each other
-/// — that's the "inconsistent appearance" this fixes. The source image is
-/// scaled to fit (preserving aspect ratio, never stretched) and centered on
-/// a transparent 64×64 canvas rather than squished to a square.
-///
-/// Returns `Ok(Some(warning))` if it succeeded but the source had little or
-/// no transparency (Roblox renders a solid box around a fully-opaque
-/// cursor), `Ok(None)` on a clean success, or `Err` on failure.
-fn normalize_cursor_image(src: &Path, dest: &Path) -> Result<Option<&'static str>, String> {
-    const CANVAS: u32 = 64;
-
-    let img = image::open(src).map_err(|e| format!("Couldn't read image: {e}"))?;
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    if w == 0 || h == 0 {
-        return Err("Image has no pixels".into());
-    }
-
-    let scale = CANVAS as f32 / w.max(h) as f32;
-    let new_w = ((w as f32) * scale).round().max(1.0) as u32;
-    let new_h = ((h as f32) * scale).round().max(1.0) as u32;
-    let resized = image::imageops::resize(&rgba, new_w, new_h, image::imageops::FilterType::Lanczos3);
-
-    let mut canvas = image::RgbaImage::new(CANVAS, CANVAS); // fully transparent by default
-    let x_off = ((CANVAS - new_w) / 2) as i64;
-    let y_off = ((CANVAS - new_h) / 2) as i64;
-    image::imageops::overlay(&mut canvas, &resized, x_off, y_off);
-
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    canvas.save(dest).map_err(|e| format!("Couldn't save image: {e}"))?;
-
-    let total = (new_w * new_h) as f32;
-    let opaque_count = resized.pixels().filter(|p| p.0[3] > 250).count() as f32;
-    if total > 0.0 && opaque_count / total > 0.98 {
-        Ok(Some("this image has little/no transparency — Roblox may show a solid box around it in-game"))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Like `pick_and_copy_file`, but for cursors specifically: runs the picked
-/// image through `normalize_cursor_image` instead of a raw byte copy.
-fn pick_and_apply_cursor(
-    window: &adw::ApplicationWindow,
-    title: &str,
-    dest: PathBuf,
-    on_done: impl Fn(Result<Option<&'static str>, String>) + 'static,
-) {
-    let dialog = gtk4::FileDialog::builder().title(title).build();
-    dialog.open(Some(window), gio::Cancellable::NONE, move |result| {
-        let Ok(file) = result else { return };
-        let Some(src) = file.path() else {
-            on_done(Err("Only local files are supported".into()));
-            return;
-        };
-        on_done(normalize_cursor_image(&src, &dest));
-    });
-}
-
 // --------------------------------------------------------------------------
 // main
 // --------------------------------------------------------------------------
@@ -649,15 +751,10 @@ fn build_ui(app: &adw::Application) {
     let state: SharedState = Rc::new(RefCell::new(AppState {
         paths: Paths::new(),
         fflags: Map::new(),
-        other: Map::new(),
     }));
     {
         let mut s = state.borrow_mut();
-        let cfg = load_config(&s.paths);
-        let mut cfg = cfg;
-        let fflags = cfg.remove("fflags").and_then(|v| v.as_object().cloned()).unwrap_or_default();
-        s.fflags = fflags;
-        s.other = cfg;
+        s.fflags = load_fflags(&s.paths);
     }
 
     let toast_overlay = adw::ToastOverlay::new();
@@ -711,7 +808,7 @@ fn build_ui(app: &adw::Application) {
 
     build_home_page(&view_stack, window.clone(), state.clone(), toast.clone());
     build_fflags_page(&view_stack, window.clone(), state.clone(), toast.clone());
-    build_customize_page(&view_stack, window.clone(), state.clone(), toast.clone());
+    build_textures_page(&view_stack, window.clone(), state.clone(), toast.clone());
     build_settings_page(&view_stack, window.clone(), state.clone(), toast.clone());
     build_advanced_page(&view_stack, window.clone(), state.clone(), toast.clone());
     build_about_page(&view_stack);
@@ -741,21 +838,21 @@ fn build_home_page(
     root.append(&gradient_title_widget());
     root.append(
         &gtk4::Label::builder()
-            .label("A community bootstrapper for Sober (Roblox on Linux)")
+            .label("A community bootstrapper for Mocktail (Roblox on Linux)")
             .css_classes(["dim-label"])
             .build(),
     );
 
     let status_group = adw::PreferencesGroup::new();
     let status_icon = gtk4::Image::from_icon_name("content-loading-symbolic");
-    let status_row = adw::ActionRow::builder().title("Checking Sober installation…").build();
+    let status_row = adw::ActionRow::builder().title("Checking Mocktail installation…").build();
     status_row.add_prefix(&status_icon);
     status_group.add(&status_row);
     root.append(&status_group);
 
     let actions = gtk4::Box::builder().spacing(10).halign(gtk4::Align::Center).build();
-    let btn_launch = gtk4::Button::builder().label("Launch Sober").css_classes(["suggested-action", "pill"]).build();
-    let btn_install = gtk4::Button::builder().label("Install Sober").css_classes(["suggested-action", "pill"]).build();
+    let btn_launch = gtk4::Button::builder().label("Launch Mocktail").css_classes(["suggested-action", "pill"]).build();
+    let btn_install = gtk4::Button::builder().label("Install Mocktail").css_classes(["suggested-action", "pill"]).build();
     let btn_update = gtk4::Button::builder().label("Update").css_classes(["pill"]).build();
     let btn_uninstall = gtk4::Button::builder().label("Uninstall").css_classes(["destructive-action", "pill"]).build();
     for b in [&btn_launch, &btn_install, &btn_update, &btn_uninstall] {
@@ -770,7 +867,7 @@ fn build_home_page(
     root.append(&multi_banner);
 
     let multi_group = adw::PreferencesGroup::builder()
-        .description("Each numbered slot gets its own isolated Sober login & data folder, so it won't hit Sober's \"already running\" lock. Sign in once per slot and it's remembered next time.")
+        .description("Each numbered slot gets its own isolated Mocktail config, data & login folder, so instances never share state. Sign in once per slot and it's remembered next time.")
         .build();
 
     root.append(&gradient_text_widget("Multi-Instance Launch", 18, GRADIENT_GREEN_YELLOW));
@@ -815,7 +912,7 @@ fn build_home_page(
     let row_ff = adw::ActionRow::builder().title("FastFlag Editor").subtitle("Tune graphics, LOD & stability flags").activatable(true).build();
     row_ff.add_suffix(&gtk4::Image::from_icon_name("go-next-symbolic"));
     quick.add(&row_ff);
-    let row_set = adw::ActionRow::builder().title("Wrapper Settings").subtitle("Rendering backend, HiDPI, touch mode").activatable(true).build();
+    let row_set = adw::ActionRow::builder().title("Wrapper Settings").subtitle("Graphics backend, HiDPI, device preset").activatable(true).build();
     row_set.add_suffix(&gtk4::Image::from_icon_name("go-next-symbolic"));
     quick.add(&row_set);
     root.append(&quick);
@@ -841,13 +938,13 @@ fn build_home_page(
         let btn_update = btn_update.clone();
         let btn_uninstall = btn_uninstall.clone();
         Rc::new(move || {
-            status_row.set_title("Checking Sober installation…");
+            status_row.set_title("Checking Mocktail installation…");
             status_icon.set_icon_name(Some("content-loading-symbolic"));
 
             let (sender, receiver) = async_channel::bounded::<(bool, Option<String>)>(1);
             thread::spawn(move || {
-                let installed = sober_installed();
-                let version = if installed { sober_version() } else { None };
+                let installed = mocktail_installed();
+                let version = if installed { mocktail_version() } else { None };
                 let _ = sender.send_blocking((installed, version));
             });
 
@@ -871,7 +968,7 @@ fn build_home_page(
                         return;
                     }
                     if installed {
-                        status_row.set_title("Sober is installed");
+                        status_row.set_title("Mocktail is installed");
                         status_row.set_subtitle(&version.map(|v| format!("Version {v}")).unwrap_or_else(|| "Ready to launch".into()));
                         status_icon.set_icon_name(Some("emblem-ok-symbolic"));
                         btn_launch.set_visible(true);
@@ -879,7 +976,7 @@ fn build_home_page(
                         btn_update.set_sensitive(true);
                         btn_uninstall.set_sensitive(true);
                     } else {
-                        status_row.set_title("Sober is not installed");
+                        status_row.set_title("Mocktail is not installed");
                         status_row.set_subtitle("Install it from Flathub to get started");
                         status_icon.set_icon_name(Some("dialog-information-symbolic"));
                         btn_launch.set_visible(false);
@@ -923,8 +1020,8 @@ fn build_home_page(
 
     // Tracks which slots we've personally launched and not yet seen exit, so
     // a click on "Launch Instances" never spawns a second process into a
-    // slot that's already running — that double-launch is exactly what
-    // triggers Sober's "already running" / frozen-instance crash.
+    // slot that's already running — a double launch would have both copies
+    // of Mocktail fighting over one config/data tree.
     let active_slots: Rc<RefCell<HashSet<u32>>> = Rc::new(RefCell::new(HashSet::new()));
     let (exit_tx, exit_rx) = async_channel::unbounded::<u32>();
 
@@ -989,7 +1086,7 @@ fn build_home_page(
         if n == 0 {
             return;
         }
-        log_line(&home_log, &format!("$ launching up to {n} Sober instance(s)…"));
+        log_line(&home_log, &format!("$ launching up to {n} Mocktail instance(s)…"));
         toast(&format!("Launching up to {n} instance(s)…"));
         launch_step(1, n, home_log.clone(), active_slots.clone(), exit_tx.clone(), refresh_running.clone());
     }));
@@ -1005,26 +1102,26 @@ fn build_home_page(
 
     btn_launch.connect_clicked(clone!(@strong toast => move |_| {
         let spawned = Command::new("flatpak")
-            .args(["run", SOBER_APP_ID])
+            .args(["run", MOCKTAIL_APP_ID])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
         match spawned {
-            Ok(_) => toast("Launching Sober…"),
-            Err(e) => toast(&format!("Couldn't launch Sober: {e}")),
+            Ok(_) => toast("Launching Mocktail…"),
+            Err(e) => toast(&format!("Couldn't launch Mocktail: {e}")),
         }
     }));
 
     btn_install.connect_clicked(clone!(@strong home_log, @strong toast, @strong refresh_status,
         @strong set_buttons_sensitive => move |_| {
         set_buttons_sensitive(false);
-        log_line(&home_log, "$ flatpak install --user -y flathub org.vinegarhq.Sober");
-        let argv = vec!["flatpak".into(), "install".into(), "--user".into(), "-y".into(), "flathub".into(), SOBER_APP_ID.into()];
+        log_line(&home_log, "$ flatpak install --user -y flathub space.bigrat.mocktail");
+        let argv = vec!["flatpak".into(), "install".into(), "--user".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()];
         run_streaming(argv,
             clone!(@strong home_log => move |l| log_line(&home_log, &l)),
             clone!(@strong toast, @strong refresh_status, @strong set_buttons_sensitive => move |code| {
                 set_buttons_sensitive(true);
-                toast(if code == 0 { "Sober installed" } else { "Install failed — see activity log" });
+                toast(if code == 0 { "Mocktail installed" } else { "Install failed — see activity log" });
                 refresh_status();
             }),
         );
@@ -1033,13 +1130,13 @@ fn build_home_page(
     btn_update.connect_clicked(clone!(@strong home_log, @strong toast, @strong refresh_status,
         @strong set_buttons_sensitive => move |_| {
         set_buttons_sensitive(false);
-        log_line(&home_log, "$ flatpak update -y org.vinegarhq.Sober");
-        let argv = vec!["flatpak".into(), "update".into(), "-y".into(), SOBER_APP_ID.into()];
+        log_line(&home_log, "$ flatpak update -y space.bigrat.mocktail");
+        let argv = vec!["flatpak".into(), "update".into(), "-y".into(), MOCKTAIL_APP_ID.into()];
         run_streaming(argv,
             clone!(@strong home_log => move |l| log_line(&home_log, &l)),
             clone!(@strong toast, @strong refresh_status, @strong set_buttons_sensitive => move |code| {
                 set_buttons_sensitive(true);
-                toast(if code == 0 { "Sober updated" } else { "Update finished with errors" });
+                toast(if code == 0 { "Mocktail updated" } else { "Update finished with errors" });
                 refresh_status();
             }),
         );
@@ -1047,18 +1144,18 @@ fn build_home_page(
 
     btn_uninstall.connect_clicked(clone!(@strong window, @strong home_log, @strong toast,
         @strong refresh_status, @strong set_buttons_sensitive => move |_| {
-        confirm_dialog(&window, "Uninstall Sober?",
-            "This removes the Sober flatpak. Your FFlag config is kept unless you also clear data in Advanced.",
+        confirm_dialog(&window, "Uninstall Mocktail?",
+            "This removes the Mocktail flatpak. Your fflags.json and config.yaml are kept unless you also clear them in Advanced.",
             "Uninstall", true,
             clone!(@strong home_log, @strong toast, @strong refresh_status, @strong set_buttons_sensitive => move || {
                 set_buttons_sensitive(false);
-                log_line(&home_log, "$ flatpak uninstall -y org.vinegarhq.Sober");
-                let argv = vec!["flatpak".into(), "uninstall".into(), "-y".into(), SOBER_APP_ID.into()];
+                log_line(&home_log, "$ flatpak uninstall -y space.bigrat.mocktail");
+                let argv = vec!["flatpak".into(), "uninstall".into(), "-y".into(), MOCKTAIL_APP_ID.into()];
                 run_streaming(argv,
                     clone!(@strong home_log => move |l| log_line(&home_log, &l)),
                     clone!(@strong toast, @strong refresh_status, @strong set_buttons_sensitive => move |code| {
                         set_buttons_sensitive(true);
-                        toast(if code == 0 { "Sober uninstalled" } else { "Uninstall finished with errors" });
+                        toast(if code == 0 { "Mocktail uninstalled" } else { "Uninstall finished with errors" });
                         refresh_status();
                     }),
                 );
@@ -1066,7 +1163,7 @@ fn build_home_page(
         );
     }));
 
-    let _ = state; // state is used by other pages; home page only reads flatpak/sober status
+    let _ = state; // state is used by other pages; home page only reads flatpak/mocktail status
 }
 
 // --------------------------------------------------------------------------
@@ -1082,7 +1179,7 @@ fn build_fflags_page(
     let root = gtk4::Box::builder().orientation(gtk4::Orientation::Vertical).spacing(18).build();
 
     let banner = adw::Banner::builder()
-        .title("Only allowlisted FFlags take effect in Sober. Unlisted flags are silently ignored by Roblox.")
+        .title("Mocktail merges fflags.json into Roblox's client settings on launch. Only allowlisted flags take effect — unlisted flags are silently ignored by Roblox.")
         .revealed(true)
         .build();
     root.append(&banner);
@@ -1116,7 +1213,7 @@ fn build_fflags_page(
 
     let save_bar = gtk4::Box::builder().spacing(10).halign(gtk4::Align::End).build();
     let clear_btn = gtk4::Button::builder().label("Clear All").css_classes(["destructive-action"]).build();
-    let save_btn = gtk4::Button::builder().label("Save to config.json").css_classes(["suggested-action"]).build();
+    let save_btn = gtk4::Button::builder().label("Save to fflags.json").css_classes(["suggested-action"]).build();
     save_bar.append(&clear_btn);
     save_bar.append(&save_btn);
     root.append(&save_bar);
@@ -1257,167 +1354,200 @@ fn build_fflags_page(
 
     save_btn.connect_clicked(clone!(@strong state, @strong toast => move |_| {
         let s = state.borrow();
-        let mut cfg = s.other.clone();
-        cfg.insert("fflags".into(), Value::Object(s.fflags.clone()));
-        match save_config(&s.paths, &cfg) {
-            Ok(_) => toast("Saved to config.json"),
+        match save_fflags(&s.paths, &s.fflags) {
+            Ok(_) => toast("Saved to fflags.json"),
             Err(e) => toast(&format!("Couldn't save: {e}")),
         }
     }));
 }
 
 // --------------------------------------------------------------------------
-// CUSTOMIZE
+// TEXTURE OVERRIDES
+//
+// Mocktail has no asset_overlay-style path-based overrides. Its one asset
+// customization hook is MOCKTAIL_TEXTURE_OVERRIDE_DIR (config/mocktail/
+// textures), scanned for `<hash>.png` files named by a 64-bit FNV-1a hash of
+// the texture's bytes. The companion MOCKTAIL_TEXTURE_DUMP_DIR env var makes
+// Mocktail write every texture it loads out as `<hash>_<w>x<h>.png` — which
+// is what makes the workflow usable: dump → pick → import → restart.
 // --------------------------------------------------------------------------
 
-fn build_customize_page(
+/// Recognizes Mocktail's dump filenames (`<16-hex-hash>_<w>x<h>.png`) and
+/// returns the hash portion.
+fn parse_dumped_texture(name: &str) -> Option<String> {
+    let stem = name.strip_suffix(".png")?;
+    let (hash, dims) = stem.rsplit_once('_')?;
+    if hash.len() != 16 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let (w, h) = dims.split_once('x')?;
+    w.parse::<u32>().ok()?;
+    h.parse::<u32>().ok()?;
+    Some(hash.to_ascii_lowercase())
+}
+
+fn build_textures_page(
     stack: &adw::ViewStack,
-    window: adw::ApplicationWindow,
+    _window: adw::ApplicationWindow,
     state: SharedState,
     toast: Rc<dyn Fn(&str)>,
 ) {
     let root = gtk4::Box::builder().orientation(gtk4::Orientation::Vertical).spacing(18).build();
 
-    let asset_overlay = state.borrow().paths.asset_overlay.clone();
-    let cursor_dir = asset_overlay.join("content/textures/Cursors/KeyboardMouse");
-    let font_dir = asset_overlay.join("content/fonts");
+    let (texture_dir, dump_dir) = {
+        let s = state.borrow();
+        (s.paths.texture_overrides.clone(), s.paths.texture_dumps.clone())
+    };
 
     let banner = adw::Banner::builder()
-        .title("Overrides live in Sober's asset_overlay folder and take effect after you restart Sober. Clearing it (Advanced tab) removes every customization at once.")
+        .title("Texture overrides are hash-named PNG files in config/mocktail/textures, applied when Mocktail restarts. Clearing them (Advanced tab) removes every override at once.")
         .revealed(true)
         .build();
     root.append(&banner);
 
-    // ---- Cursor: documented, exact paths confirmed by VinegarHQ's own docs ----
-    let cursor_group = adw::PreferencesGroup::builder()
-        .description("Replaces the three cursor images Sober actually keeps locally. Any image works — Lemonyde resizes and centers it on a transparent 64×64 canvas, the size Roblox actually expects, so all three look consistent in-game. A few cursors (the gun/drag cursors) are streamed from Roblox's servers and can't be overridden this way.")
+    // ---- Dump / import / manage workflow ----
+    let workflow_group = adw::PreferencesGroup::builder()
+        .description("Mocktail has no filename-based asset overrides — textures are addressed by content hash. Dump them first, then import renames your picks into place.")
         .build();
-    root.append(&gradient_text_widget("Cursor", 18, GRADIENT_GREEN_YELLOW));
+    root.append(&gradient_text_widget("Dump & Import", 18, GRADIENT_GREEN_YELLOW));
 
-    let cursor_targets: [(&str, &str, &str); 3] = [
-        ("ArrowCursor.png", "Pointer", "The default arrow cursor"),
-        ("ArrowFarCursor.png", "Pointer (zoomed out)", "Used when the camera is far from your character"),
-        ("IBeamCursor.png", "Text Cursor", "Shown when hovering over text fields"),
-    ];
-
-    for (filename, title, subtitle) in cursor_targets {
-        let dest = cursor_dir.join(filename);
-        let row = adw::ActionRow::builder().title(title).subtitle(subtitle).build();
-
-        let status = gtk4::Label::builder()
-            .label(if dest.exists() { "Custom" } else { "Default" })
-            .css_classes(["dim-label", "caption"])
-            .valign(gtk4::Align::Center)
-            .build();
-        row.add_suffix(&status);
-
-        let choose_btn = gtk4::Button::builder().label("Choose Image…").valign(gtk4::Align::Center).build();
-        row.add_suffix(&choose_btn);
-
-        let reset_btn = gtk4::Button::builder()
-            .icon_name("edit-undo-symbolic")
-            .css_classes(["flat"])
-            .valign(gtk4::Align::Center)
-            .tooltip_text("Reset to default")
-            .build();
-        row.add_suffix(&reset_btn);
-
-        choose_btn.connect_clicked(clone!(@strong window, @strong toast, @strong status, @strong dest, @strong title
-            => move |_| {
-            pick_and_apply_cursor(&window, "Choose a cursor image (any size — it'll be normalized to 64×64)", dest.clone(),
-                clone!(@strong toast, @strong status, @strong title => move |result| {
-                match result {
-                    Ok(None) => {
-                        status.set_label("Custom");
-                        toast(&format!("{title} updated — restart Sober to see it"));
-                    }
-                    Ok(Some(warning)) => {
-                        status.set_label("Custom");
-                        toast(&format!("{title} updated, but {warning}"));
-                    }
-                    Err(e) => toast(&format!("Couldn't set {title}: {e}")),
-                }
-            }));
-        }));
-
-        reset_btn.connect_clicked(clone!(@strong toast, @strong status, @strong dest, @strong title => move |_| {
-            if dest.exists() {
-                let _ = std::fs::remove_file(&dest);
-                status.set_label("Default");
-                toast(&format!("{title} reset to Roblox's default"));
-            } else {
-                toast(&format!("{title} is already default"));
-            }
-        }));
-
-        cursor_group.add(&row);
-    }
-    root.append(&cursor_group);
-
-    // ---- Font: same asset_overlay mechanism, but the exact filename Sober's
-    // Android-based client expects isn't documented the way cursors are, so
-    // this is offered as best-effort rather than a guaranteed-working preset. ----
-    let font_group = adw::PreferencesGroup::builder()
-        .description("Uses the same content/fonts/ convention Roblox uses on other platforms, but Sober doesn't officially document the exact filename its Android-based client expects — you may need to try a few names, or inspect the installed app's assets to confirm one.")
+    let dump_row = adw::ActionRow::builder()
+        .title("Launch With Texture Dumping")
+        .subtitle(format!("Starts Mocktail writing every texture it loads to {}", dump_dir.display()))
         .build();
-    root.append(&gradient_text_widget("In-Game Font (experimental)", 18, GRADIENT_GREEN_YELLOW));
-
-    let font_name_row = adw::EntryRow::builder()
-        .title("Target filename inside content/fonts/")
+    let btn_dump_launch = gtk4::Button::builder()
+        .label("Launch")
+        .css_classes(["suggested-action"])
+        .valign(gtk4::Align::Center)
         .build();
-    font_group.add(&font_name_row);
+    dump_row.add_suffix(&btn_dump_launch);
+    workflow_group.add(&dump_row);
 
-    let font_status_row = adw::ActionRow::builder()
-        .title("Font file")
-        .subtitle(if font_dir.exists() && font_dir.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false) {
-            "A custom font is currently applied"
-        } else {
-            "No custom font applied"
-        })
-        .build();
-    let font_choose_btn = gtk4::Button::builder().label("Choose Font…").valign(gtk4::Align::Center).build();
-    font_status_row.add_suffix(&font_choose_btn);
-    let font_reset_btn = gtk4::Button::builder()
-        .icon_name("edit-undo-symbolic")
+    let import_row = adw::ActionRow::builder().title("Import Dumped Textures").build();
+    let btn_import = gtk4::Button::builder().label("Import").valign(gtk4::Align::Center).build();
+    import_row.add_suffix(&btn_import);
+    workflow_group.add(&import_row);
+
+    let active_row = adw::ActionRow::builder().title("Active Overrides").build();
+    let btn_refresh = gtk4::Button::builder()
+        .icon_name("view-refresh-symbolic")
         .css_classes(["flat"])
         .valign(gtk4::Align::Center)
-        .tooltip_text("Remove all custom fonts")
+        .tooltip_text("Refresh")
         .build();
-    font_status_row.add_suffix(&font_reset_btn);
-    font_group.add(&font_status_row);
-    root.append(&font_group);
+    active_row.add_suffix(&btn_refresh);
+    workflow_group.add(&active_row);
 
-    font_choose_btn.connect_clicked(clone!(@strong window, @strong toast, @strong font_name_row,
-        @strong font_status_row, @strong font_dir => move |_| {
-        let name = font_name_row.text().trim().to_string();
-        if name.is_empty() {
-            toast("Type the target filename first, e.g. a name you found by inspecting Sober's assets");
-            return;
-        }
-        let dest = font_dir.join(&name);
-        pick_and_copy_file(&window, "Choose a font file (.ttf / .otf)", dest,
-            clone!(@strong toast, @strong font_status_row, @strong name => move |result| {
-            match result {
-                Ok(()) => {
-                    font_status_row.set_subtitle(&format!("Applied as {name} — restart Sober and check if it took"));
-                    toast("Font copied — this is experimental, so double-check in game");
-                }
-                Err(e) => toast(&format!("Couldn't apply font: {e}")),
+    let open_row = adw::ActionRow::builder()
+        .title("Open Overrides Folder")
+        .subtitle(texture_dir.display().to_string())
+        .activatable(true)
+        .build();
+    open_row.add_suffix(&gtk4::Image::from_icon_name("folder-symbolic"));
+    workflow_group.add(&open_row);
+    root.append(&workflow_group);
+
+    let log_scroll = gtk4::ScrolledWindow::builder().min_content_height(120).css_classes(["lemonyde-card"]).build();
+    let tex_log = gtk4::TextView::builder().editable(false).cursor_visible(false).monospace(true).css_classes(["lemonyde-log"]).build();
+    log_scroll.set_child(Some(&tex_log));
+    root.append(&log_scroll);
+
+    root.append(&gradient_text_widget("How It Works", 18, GRADIENT_GREEN_YELLOW));
+    let how_group = adw::PreferencesGroup::builder()
+        .description("1. Launch with dumping — Mocktail writes a hash-named PNG (hash_WxH.png) copy of every texture it loads. 2. Browse the dumps folder and edit the textures you want in any image editor. 3. Import — each dump becomes hash.png in the overrides folder. 4. Restart Mocktail; that hash's texture is replaced wherever it appears. Overrides are keyed by content, so a texture Roblox updates will no longer match its dump.")
+        .build();
+    root.append(&how_group);
+
+    // Keep the waiting/active counts honest after every action.
+    let refresh_counts: Rc<dyn Fn()> = {
+        let import_row = import_row.clone();
+        let active_row = active_row.clone();
+        let dump_dir = dump_dir.clone();
+        let texture_dir = texture_dir.clone();
+        Rc::new(move || {
+            let dumped = std::fs::read_dir(&dump_dir)
+                .map(|d| {
+                    d.filter_map(Result::ok)
+                        .filter(|e| parse_dumped_texture(&e.file_name().to_string_lossy()).is_some())
+                        .count()
+                })
+                .unwrap_or(0);
+            let active = std::fs::read_dir(&texture_dir)
+                .map(|d| {
+                    d.filter_map(Result::ok)
+                        .filter(|e| e.path().extension().is_some_and(|x| x == "png"))
+                        .count()
+                })
+                .unwrap_or(0);
+            if dumped == 0 {
+                import_row.set_subtitle("No dumped textures waiting — launch with dumping first");
+            } else {
+                import_row.set_subtitle(&format!("{dumped} dumped texture(s) waiting — copies each to textures/ as hash.png"));
             }
-        }));
+            active_row.set_subtitle(&format!("{active} override file(s) in {}", texture_dir.display()));
+        })
+    };
+    refresh_counts();
+
+    btn_refresh.connect_clicked(clone!(@strong refresh_counts => move |_| {
+        refresh_counts();
     }));
 
-    font_reset_btn.connect_clicked(clone!(@strong toast, @strong font_status_row, @strong font_dir => move |_| {
-        if font_dir.exists() {
-            let _ = std::fs::remove_dir_all(&font_dir);
-            font_status_row.set_subtitle("No custom font applied");
-            toast("Custom fonts removed");
-        } else {
-            toast("No custom font to remove");
+    open_row.connect_activated(clone!(@strong toast, @strong texture_dir => move |_| {
+        let _ = std::fs::create_dir_all(&texture_dir);
+        let uri = format!("file://{}", texture_dir.display());
+        if gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE).is_err() {
+            toast("Couldn't open folder");
         }
     }));
 
-    stack.add_titled_with_icon(&page_scroller(&root), Some("customize"), "Customize", "applications-graphics-symbolic");
+    btn_import.connect_clicked(clone!(@strong toast, @strong refresh_counts, @strong dump_dir, @strong texture_dir
+        => move |_| {
+        let mut imported = 0usize;
+        if let Ok(entries) = std::fs::read_dir(&dump_dir) {
+            let _ = std::fs::create_dir_all(&texture_dir);
+            for entry in entries.filter_map(Result::ok) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if let Some(hash) = parse_dumped_texture(&name) {
+                    if std::fs::copy(entry.path(), texture_dir.join(format!("{hash}.png"))).is_ok() {
+                        imported += 1;
+                    }
+                }
+            }
+        }
+        refresh_counts();
+        if imported == 0 {
+            toast("No dumped textures found — launch with dumping first");
+        } else {
+            toast(&format!("Imported {imported} texture override(s) — restart Mocktail"));
+        }
+    }));
+
+    btn_dump_launch.connect_clicked(clone!(@strong toast, @strong tex_log, @strong refresh_counts,
+        @strong dump_dir, @strong btn_dump_launch => move |_| {
+        btn_dump_launch.set_sensitive(false);
+        log_line(&tex_log, &format!("$ flatpak run --env=MOCKTAIL_TEXTURE_DUMP_DIR={} {}", dump_dir.display(), MOCKTAIL_APP_ID));
+        let argv = vec![
+            "flatpak".into(),
+            "run".into(),
+            format!("--env=MOCKTAIL_TEXTURE_DUMP_DIR={}", dump_dir.display()),
+            MOCKTAIL_APP_ID.into(),
+        ];
+        run_streaming(argv,
+            clone!(@strong tex_log => move |l| log_line(&tex_log, &l)),
+            clone!(@strong toast, @strong refresh_counts, @strong btn_dump_launch => move |code| {
+                btn_dump_launch.set_sensitive(true);
+                if code == 0 {
+                    toast("Mocktail closed — pick textures to import below");
+                } else {
+                    toast("Dump session ended — see the log above");
+                }
+                refresh_counts();
+            }),
+        );
+    }));
+
+    stack.add_titled_with_icon(&page_scroller(&root), Some("textures"), "Textures", "applications-graphics-symbolic");
 }
 
 // --------------------------------------------------------------------------
@@ -1432,58 +1562,87 @@ fn build_settings_page(
 ) {
     let root = gtk4::Box::builder().orientation(gtk4::Orientation::Vertical).spacing(18).build();
 
-    let banner = adw::Banner::builder().title("These map to root-level keys in Sober's config.json wrapper settings.").revealed(true).build();
+    let banner = adw::Banner::builder()
+        .title("These map to keys in Mocktail's config.yaml, which Mocktail reads on its next launch.")
+        .revealed(true)
+        .build();
     root.append(&banner);
+
+    let settings_file = state.borrow().paths.settings_file.clone();
+    let yaml_text = std::fs::read_to_string(&settings_file).unwrap_or_default();
+
+    const BACKENDS: &[&str] = &["direct-vulkan", "opengl", "system", "angle-vulkan"];
+    const THEMES: &[&str] = &["roblox", "dark", "light", "system"];
 
     let group = adw::PreferencesGroup::builder().build();
     root.append(&gradient_text_widget("Rendering & Display", 18, GRADIENT_GREEN_YELLOW));
 
-    let row_opengl = adw::SwitchRow::builder().title("Force OpenGL").subtitle("use_opengl — try this if Vulkan causes black screens or crashes").build();
-    let row_hidpi = adw::SwitchRow::builder().title("Enable HiDPI").subtitle("enable_hidpi — sharper UI on high-resolution displays (Wayland only)").build();
-    let row_close = adw::SwitchRow::builder().title("Close on Leave").subtitle("close_on_leave — exit Sober automatically when you leave a game").build();
-    group.add(&row_opengl);
+    let current_backend = yaml_get(&yaml_text, &["graphics", "backend"]).unwrap_or_else(|| "direct-vulkan".into());
+    let row_backend = adw::ComboRow::builder()
+        .title("Graphics Backend")
+        .subtitle("graphics.backend — try opengl if Vulkan causes black screens or crashes")
+        .model(&gtk4::StringList::new(BACKENDS))
+        .build();
+    row_backend.set_selected(BACKENDS.iter().position(|b| *b == current_backend).unwrap_or(0) as u32);
+
+    let row_hidpi = adw::SwitchRow::builder()
+        .title("Enable HiDPI")
+        .subtitle("window.high_dpi — render at physical display-pixel density for sharper high-DPI output")
+        .build();
+    row_hidpi.set_active(yaml_get(&yaml_text, &["window", "high_dpi"]).is_some_and(|v| v.eq_ignore_ascii_case("true")));
+
+    group.add(&row_backend);
     group.add(&row_hidpi);
-    group.add(&row_close);
     root.append(&group);
 
     let group2 = adw::PreferencesGroup::builder()
-        .description("Community-reported setting — verify against the Vinegar docs if it seems to have no effect.")
+        .description("The device line decides which client profile Roblox sees. Presets: pc-windows-11, mobile-pixel-7, console-ps5 — or the short aliases pc, mobile, console.")
         .build();
-    root.append(&gradient_text_widget("Input", 18, GRADIENT_GREEN_YELLOW));
-    let row_touch = adw::EntryRow::builder().title("touch_mode").build();
-    group2.add(&row_touch);
+    root.append(&gradient_text_widget("Device & Appearance", 18, GRADIENT_GREEN_YELLOW));
+
+    let row_device = adw::EntryRow::builder().title("Device preset").build();
+    row_device.set_text(&yaml_get(&yaml_text, &["device"]).unwrap_or_default());
+
+    let current_theme = yaml_get(&yaml_text, &["appearance", "theme"]).unwrap_or_else(|| "roblox".into());
+    let row_theme = adw::ComboRow::builder()
+        .title("Theme")
+        .subtitle("appearance.theme — roblox keeps Roblox's saved account theme")
+        .model(&gtk4::StringList::new(THEMES))
+        .build();
+    row_theme.set_selected(THEMES.iter().position(|t| *t == current_theme).unwrap_or(0) as u32);
+
+    group2.add(&row_device);
+    group2.add(&row_theme);
     root.append(&group2);
-
-    {
-        let s = state.borrow();
-        row_opengl.set_active(s.other.get("use_opengl").and_then(Value::as_bool).unwrap_or(false));
-        row_hidpi.set_active(s.other.get("enable_hidpi").and_then(Value::as_bool).unwrap_or(false));
-        row_close.set_active(s.other.get("close_on_leave").and_then(Value::as_bool).unwrap_or(false));
-        row_touch.set_text(&s.other.get("touch_mode").map(value_to_string).unwrap_or_default());
-    }
-
-    row_opengl.connect_active_notify(clone!(@strong state => move |r| {
-        state.borrow_mut().other.insert("use_opengl".into(), Value::Bool(r.is_active()));
-    }));
-    row_hidpi.connect_active_notify(clone!(@strong state => move |r| {
-        state.borrow_mut().other.insert("enable_hidpi".into(), Value::Bool(r.is_active()));
-    }));
-    row_close.connect_active_notify(clone!(@strong state => move |r| {
-        state.borrow_mut().other.insert("close_on_leave".into(), Value::Bool(r.is_active()));
-    }));
-    row_touch.connect_apply(clone!(@strong state => move |r| {
-        state.borrow_mut().other.insert("touch_mode".into(), Value::String(r.text().to_string()));
-    }));
 
     let save_btn = gtk4::Button::builder().label("Save Settings").css_classes(["suggested-action", "pill"]).halign(gtk4::Align::End).build();
     root.append(&save_btn);
 
-    save_btn.connect_clicked(clone!(@strong state, @strong toast => move |_| {
+    save_btn.connect_clicked(clone!(@strong state, @strong toast, @strong row_backend, @strong row_hidpi,
+        @strong row_device, @strong row_theme => move |_| {
         let s = state.borrow();
-        let mut cfg = s.other.clone();
-        cfg.insert("fflags".into(), Value::Object(s.fflags.clone()));
-        match save_config(&s.paths, &cfg) {
-            Ok(_) => toast("Settings saved"),
+        // Re-read the file so edits made in a text editor since the page
+        // loaded aren't clobbered — yaml_set only touches our own keys.
+        let mut text = std::fs::read_to_string(&s.paths.settings_file).unwrap_or_default();
+        let backend = BACKENDS.get(row_backend.selected() as usize).copied().unwrap_or("direct-vulkan");
+        let theme = THEMES.get(row_theme.selected() as usize).copied().unwrap_or("roblox");
+        text = yaml_set(&text, &["graphics", "backend"], backend);
+        text = yaml_set(&text, &["window", "high_dpi"], if row_hidpi.is_active() { "true" } else { "false" });
+        let device = row_device.text().trim().to_string();
+        if !device.is_empty() {
+            text = yaml_set(&text, &["device"], &device);
+        }
+        text = yaml_set(&text, &["appearance", "theme"], theme);
+
+        let result = (|| -> std::io::Result<()> {
+            std::fs::create_dir_all(&s.paths.config_dir)?;
+            if s.paths.settings_file.exists() {
+                let _ = std::fs::copy(&s.paths.settings_file, s.paths.settings_file.with_extension("yaml.bak"));
+            }
+            std::fs::write(&s.paths.settings_file, text)
+        })();
+        match result {
+            Ok(_) => toast("Settings saved to config.yaml"),
             Err(e) => toast(&format!("Couldn't save: {e}")),
         }
     }));
@@ -1505,10 +1664,11 @@ fn build_advanced_page(
 
     let paths_snapshot = {
         let s = state.borrow();
-        (s.paths.config_dir.clone(), s.paths.data_dir.clone(), s.paths.asset_overlay.clone(),
-         s.paths.config_file.clone(), s.paths.client_settings.clone())
+        (s.paths.config_dir.clone(), s.paths.data_dir.clone(),
+         s.paths.texture_overrides.clone(), s.paths.texture_dumps.clone(),
+         s.paths.fflags_file.clone(), s.paths.settings_file.clone())
     };
-    let (config_dir, data_dir, asset_overlay, config_file, client_settings) = paths_snapshot;
+    let (config_dir, data_dir, texture_overrides, texture_dumps, fflags_file, settings_file) = paths_snapshot;
 
     let group = adw::PreferencesGroup::builder().build();
     root.append(&gradient_text_widget("Files & Folders", 18, GRADIENT_GREEN_YELLOW));
@@ -1529,12 +1689,12 @@ fn build_advanced_page(
 
     let group2 = adw::PreferencesGroup::builder().build();
     root.append(&gradient_text_widget("Maintenance", 18, GRADIENT_GREEN_YELLOW));
-    let r3 = adw::ActionRow::builder().title("Clear Asset Overlay").subtitle("Removes custom texture/asset replacements").activatable(true).build();
+    let r3 = adw::ActionRow::builder().title("Clear Texture Overrides").subtitle("Removes custom texture overrides and dumped textures").activatable(true).build();
     r3.add_suffix(&gtk4::Image::from_icon_name("edit-clear-symbolic"));
     group2.add(&r3);
     let r4 = adw::ActionRow::builder()
         .title("Reset FFlags & Config")
-        .subtitle("Deletes config.json and ClientAppSettings.json (per VinegarHQ's official reset steps)")
+        .subtitle("Deletes fflags.json and config.yaml — Mocktail regenerates defaults on next launch")
         .activatable(true)
         .build();
     r4.add_suffix(&gtk4::Image::from_icon_name("view-refresh-symbolic"));
@@ -1574,14 +1734,20 @@ fn build_advanced_page(
         }
     }));
 
-    r3.connect_activated(clone!(@strong window, @strong toast, @strong adv_log, @strong asset_overlay => move |_| {
-        let body = format!("This deletes:\n{}", asset_overlay.display());
-        confirm_dialog(&window, "Clear asset overlay?", &body, "Clear", true,
-            clone!(@strong toast, @strong adv_log, @strong asset_overlay => move || {
-                if asset_overlay.exists() {
-                    let _ = std::fs::remove_dir_all(&asset_overlay);
-                    log_line(&adv_log, &format!("Removed {}", asset_overlay.display()));
-                    toast("Asset overlay cleared");
+    r3.connect_activated(clone!(@strong window, @strong toast, @strong adv_log, @strong texture_overrides, @strong texture_dumps => move |_| {
+        let body = format!("This deletes:\n{}\n{}", texture_overrides.display(), texture_dumps.display());
+        confirm_dialog(&window, "Clear texture overrides?", &body, "Clear", true,
+            clone!(@strong toast, @strong adv_log, @strong texture_overrides, @strong texture_dumps => move || {
+                let mut cleared = false;
+                for dir in [&texture_overrides, &texture_dumps] {
+                    if dir.exists() {
+                        let _ = std::fs::remove_dir_all(dir);
+                        log_line(&adv_log, &format!("Removed {}", dir.display()));
+                        cleared = true;
+                    }
+                }
+                if cleared {
+                    toast("Texture overrides cleared");
                 } else {
                     toast("Nothing to clear");
                 }
@@ -1590,12 +1756,12 @@ fn build_advanced_page(
     }));
 
     r4.connect_activated(clone!(@strong window, @strong state, @strong toast, @strong adv_log,
-        @strong config_file, @strong client_settings => move |_| {
+        @strong fflags_file, @strong settings_file => move |_| {
         confirm_dialog(&window, "Reset FFlags & config?",
-            "This deletes config.json and ClientAppSettings.json. Sober will regenerate defaults on next launch.",
+            "This deletes fflags.json and config.yaml. Mocktail will regenerate defaults on next launch.",
             "Reset", true,
-            clone!(@strong state, @strong toast, @strong adv_log, @strong config_file, @strong client_settings => move || {
-                for f in [&config_file, &client_settings] {
+            clone!(@strong state, @strong toast, @strong adv_log, @strong fflags_file, @strong settings_file => move || {
+                for f in [&fflags_file, &settings_file] {
                     if f.exists() {
                         let _ = std::fs::remove_file(f);
                         log_line(&adv_log, &format!("Deleted {}", f.display()));
@@ -1603,8 +1769,7 @@ fn build_advanced_page(
                 }
                 let mut s = state.borrow_mut();
                 s.fflags.clear();
-                s.other.clear();
-                toast("Sober config reset");
+                toast("Mocktail config reset");
             }),
         );
     }));
@@ -1621,10 +1786,10 @@ fn build_about_page(stack: &adw::ViewStack) {
 
     let group = adw::PreferencesGroup::new();
     for (label, uri) in [
-        ("Sober (VinegarHQ)", "https://sober.vinegarhq.org/"),
-        ("Sober on Flathub", "https://flathub.org/apps/org.vinegarhq.Sober"),
-        ("Sober source / issue tracker", "https://github.com/vinegarhq/sober"),
-        ("Allowlisted FastFlags reference", "https://github.com/dyokism/sober-fastflags"),
+        ("Mocktail website", "https://mocktail.bigrat.space/"),
+        ("Mocktail on Flathub", "https://flathub.org/apps/space.bigrat.mocktail"),
+        ("Mocktail source / issue tracker", "https://github.com/komaruworld/mocktail"),
+        ("FastFlags allowlist reference (Sober guide)", "https://github.com/dyokism/sober-fastflags"),
     ] {
         let row = adw::ActionRow::builder().title(label).subtitle(uri).activatable(true).build();
         row.add_suffix(&gtk4::Image::from_icon_name("adw-external-link-symbolic"));
@@ -1639,9 +1804,9 @@ fn build_about_page(stack: &adw::ViewStack) {
         &gtk4::Label::builder()
             .label(
                 "Lemonyde is an independent, unofficial tool and is not affiliated with, \
-                 endorsed by, or supported by Roblox Corporation or the VinegarHQ team. \
-                 Sober's FFlag allowlist is controlled by Roblox and may change at any time; \
-                 flags outside the allowlist are ignored automatically.",
+                 endorsed by, or supported by Roblox Corporation or the Mocktail project \
+                 authors. FFlag allowlists are controlled by Roblox and may change at any \
+                 time; flags outside the allowlist are ignored automatically.",
             )
             .wrap(true)
             .css_classes(["dim-label", "caption"])

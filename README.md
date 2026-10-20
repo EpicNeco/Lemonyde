@@ -11,13 +11,13 @@
 </div>
 
 # 🍹🍋 Lemonyde 
-An unofficial, community-made **bootstrapper for Sober** — the [VinegarHQ](https://sober.vinegarhq.org)
-flatpak that runs Roblox on Linux. Lemonyde gives Sober a native GTK4 +
+An unofficial, community-made **bootstrapper for [Mocktail](<https://mocktail.bigrat.space>)** application
+that runs Roblox on Linux. Lemonyde gives Sober a native GTK4 +
 libadwaita GUI for the stuff you'd otherwise do by hand in a terminal or
 text editor: installing/updating/launching Sober, editing FastFlags
 (FFlags), and tweaking its wrapper settings.
 
-## keep in mind : **LEMONYDE IS IN DEVELOPMENT SO EXPECT CHANGES!**
+## keep in mind : **!!!LEMONYDE IS IN DEVELOPMENT SO EXPECT CHANGES AND BUGS!!!**
 
 
 # Install
@@ -26,70 +26,37 @@ text editor: installing/updating/launching Sober, editing FastFlags
 curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash
 ```
 
-This builds Lemonyde in release mode, copies the binary + your lemon logo to
-`~/.local/share/lemonyde`, adds a `lemonyde` launcher to `~/.local/bin`,
-installs the logo into your icon theme, and adds a desktop entry so it shows
-up (with its icon) in your app menu. It offers to install any missing dev
-packages and to add the Flathub remote, but never runs `sudo` without asking.
+this installs the app to `~/.local/bin` and updates it if needed
 
-
-**Not affiliated with Roblox Corporation or VinegarHQ.** Sober itself stays
-exactly as VinegarHQ ships it — Lemonyde only edits Sober's own config files
-and calls `flatpak` on your behalf.
+**Not affiliated with Roblox Corporation or bigrat.space**
 
 ## Features
 
-- **One-click install / update / launch / uninstall** for `org.vinegarhq.Sober`,
-  with a live streaming log so you can see exactly what Flatpak is doing.
-- **Multi-instance launch** — open several *isolated* Sober windows at once
-  (e.g. to play on separate accounts side by side). Sober enforces its own
-  single-instance lock, so Lemonyde gives each numbered slot its own fake
-  `$HOME` (stored under `~/.local/share/lemonyde/instances/slot-N`) — that's
-  what a launched Sober instance uses to find its own `~/.var/app/...` data,
-  so each slot gets a fully separate lock file, config, and login session
-  that persists between launches. Lemonyde also tracks which slots it has
-  launched and won't spawn a second process into a slot that's already
-  running — that double-launch (e.g. clicking Launch again before the first
-  onboarding wizard finished) was the actual cause of the "frozen instance"
-  crash. **Heads up:** Roblox's rules treat running multiple clients at the
+- **One-click install / update / launch / uninstall** for mocktail,
+  with a live streaming log so you can see exactly what Lemonyde is doing.
+- **Multi-instance launch** — open several *isolated* Mocktail windows at once
+  (e.g. to play on separate accounts side by side). 
+  **Heads up:** Roblox's rules treat running multiple clients at the
   same time as against policy, and community reports say it can trigger an
   anti-cheat flag on your account — Lemonyde shows this warning in the app
   too, so use it at your own discretion. Note the FFlag/Settings editors
-  only manage your *main* Sober install, not the isolated instance slots.
-- **FFlag editor** — add, edit, and remove entries in the `fflags` section of
-  `~/.var/app/org.vinegarhq.Sober/config/sober/config.json`, with:
+  only manage your *main* Mocktail install, not the isolated instance slots.
+- **FFlag editor** — add, edit, and remove entries in the `fflags.json` with:
   - Three ready-made presets (Low-End/VRAM Fix, Balanced, Maximum Fidelity)
   - A library of flags **confirmed to be on Roblox's client-config allowlist**
     (flags outside the allowlist are silently ignored by Roblox, so Lemonyde
     doesn't bother listing unconfirmed ones)
-- **Customize tab** — swap Roblox's in-game cursor (arrow, zoomed-out arrow,
-  text cursor) via Sober's documented `asset_overlay` mechanism, with
-  one-click file picking and a reset-to-default button per cursor. Any
-  source image works — Lemonyde automatically resizes and centers it on a
-  transparent 64×64 canvas (the exact dimensions Roblox's cursor format
-  expects, per Bloxstrap's modding docs), so all three cursors render at a
-  consistent size in-game instead of whatever size the source file happened
-  to be. It also warns you if the picked image has no transparency, since
-  Roblox renders a solid box around a fully-opaque cursor. Also includes an
-  **experimental** font override using the same `asset_overlay` mechanism —
-  flagged as experimental because, unlike the cursor paths (which VinegarHQ's
-  own docs confirm), Sober doesn't document the exact filename its
-  Android-based client expects for a font override, so you may need to try
-  a few names.
-- **Wrapper settings** — toggle `use_opengl`, `enable_hidpi`, `close_on_leave`,
-  and edit `touch_mode`, all stored at the root of `config.json`.
-- **Advanced tools** — open the config/data folders, clear the asset overlay,
-  and do a full FFlag/config reset (mirrors VinegarHQ's official reset steps).
-- **And many more.**
+- **Texture Overrides** dumps the textures
   
 
 ## Where things live
 
 | What | Path |
 |---|---|
-| Sober's wrapper + FFlag config | `~/.var/app/org.vinegarhq.Sober/config/sober/config.json` |
-| Roblox's own generated settings | `~/.var/app/org.vinegarhq.Sober/data/sober/exe/ClientSettings/ClientAppSettings.json` |
-| Custom asset overlay | `~/.var/app/org.vinegarhq.Sober/data/sober/asset_overlay` |
+| Config | `~/.config/mocktail/config.yaml` |
+| Mocktail | `~/.config/mocktail/fflags.json` |
+| Custom asset overlay | `~/.config/mocktail/textures` |
+| Multi Instance Slots | `~/.local/share/lemonyde/instances` |
 
 ## FFlags: know the limits
 
@@ -98,11 +65,8 @@ overridden FastFlags — anything not on that list is ignored, even if it's
 spelled correctly. Lemonyde's flag library only includes flags confirmed
 to still be active (rendering/LOD, MSAA, texture quality, grass distance,
 etc.). Don't attempt to bypass the allowlist or use cache/memory-editing
-tricks — VinegarHQ and the community flag that as a ban risk under Roblox's
-Hyperion anti-cheat.
+tricks.
 
 ## License
 
-Do whatever you like with this bootstrapper. Sober itself is closed-source
-and owned by VinegarHQ; Lemonyde does not redistribute it, only automates
-`flatpak install/run/update` calls against the public Flathub package.
+**Do whatever you like with this bootstrapper as long as you make it FOSS.**

@@ -4,31 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lemonyde — an unofficial bootstrapper for Mocktail</title>
-<meta name="description" content="Lemonyde is a community-made bootstrapper for Sober, the VinegarHQ flatpak that runs Roblox on Linux. Install, update, launch, edit FastFlags, and customize your cursor from one native GTK4 app.">
+<meta name="description" content="Lemonyde is a community-made bootstrapper for Mocktail. Install, update, launch, edit FastFlags, and customize from one native GTK4 app.">
 
 <meta property="og:type" content="website">
-<meta property="og:image" content="https://cdn.discordapp.com/icons/1541849281298829353/b3c4fa4f0d1554b138d879990e4c315c.webp?size=96&quality=lossless">
+<meta property="og:image" content="https://cdn.discordapp.com/icons/1541849281298829353/b3c4fa4f0d1554b138d879990e4c315c.webp?size=512&quality=lossless">
 <meta property="og:title" content="Lemonyde — an unofficial bootstrapper for Mocktail">
 <meta property="og:description" content="A native GTK4 control panel for Mocktail">
 <meta property="og:url" content="https://epicneco.github.io/Lemonyde/">
-<meta name="twitter:card" content="summary">
+<meta name="twitter:card" content="summary_large_image">
 
 <link rel="icon" type="image/svg+xml" href="assets/lemonyde.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
+<div class="grid-background"></div>
 
 <header class="site-header">
   <div class="wrap header-row">
     <a class="brand" href="#top">
-      <img src="assets/lemonyde.svg" alt="" width="22" height="22">
+      <img src="assets/lemonyde.svg" alt="Lemonyde logo" width="28" height="28">
       <span>Lemonyde</span>
     </a>
     <nav class="site-nav" aria-label="Primary">
       <a href="#features">Features</a>
+      <a href="#install">Install</a>
       <a href="https://dc.gg/lemonyde">Discord</a>
       <a href="https://github.com/EpicNeco/Lemonyde">GitHub</a>
     </nav>
@@ -39,51 +41,112 @@
 
   <section class="hero" id="top">
     <div class="wrap">
-      <img class="wordmark" src="assets/lemonyde-title.svg" alt="Lemonyde" width="320" height="66">
-      <p class="hero-tagline">A native control panel for Mocktail.</p>
-      <p class="hero-note">Not affiliated with Roblox Corporation or bigrat.space
+      <img class="wordmark" src="assets/lemonyde-title.svg" alt="Lemonyde" width="420" height="86">
+      <p class="hero-tagline">A native control panel for Mocktail</p>
+      <p class="hero-note">Not affiliated with Roblox Corporation or bigrat.space</p>
       <div class="hero-actions">
-        <a class="btn" href="https://epicneco.github.io/Lemonyde#install">Get Lemonyde</a>
-        <a class="btn" href="https://github.com/EpicNeco/Lemonyde">Build From Source</a>
+        <a class="btn" href="#install">
+<svg id="Layer_1" data-name="Layer 1" width=24 height=24 xmlns="http://www.w3.org/2000/svg" viewBox="0 0 122.88 120.89"><title>download-file</title><path d="M84.58,47a7.71,7.71,0,1,1,10.8,11L66.09,86.88a7.72,7.72,0,0,1-10.82,0L26.4,58.37a7.71,7.71,0,1,1,10.81-11L53.1,63.12l.16-55.47a7.72,7.72,0,0,1,15.43.13l-.15,55L84.58,47ZM0,113.48.1,83.3a7.72,7.72,0,1,1,15.43.14l-.07,22q46,.09,91.91,0l.07-22.12a7.72,7.72,0,1,1,15.44.14l-.1,30h-.09a7.71,7.71,0,0,1-7.64,7.36q-53.73.1-107.38,0A7.7,7.7,0,0,1,0,113.48Z"/></svg>
+          Get Lemonyde
+        </a>
+        <a class="btn btn-secondary" href="https://github.com/EpicNeco/Lemonyde">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+          </svg>
+          Build From Source
+        </a>
       </div>
     </div>
   </section>
 
   <section id="features">
     <div class="wrap">
-      <h2>What it does</h2>
-      <ul class="plain-list">
-        <li><strong>Home.</strong> Install, update, launch, or uninstall Mocktail, with isolated
-          multi-instance slots for running more than one account.</li>
-        <li><strong>FFlags.</strong> An editor for flags confirmed to still work on Roblox's
-          allowlist, plus presets.</li>
-        <li><strong>Settings.</strong> The wrapper options Mocktail reads from its own config, without
-          a text editor.</li>
-        <li><strong>Advanced.</strong> Open the config/data folders, clear the asset overlay, or
-          reset everything in one click.</li>
-        <li><strong>Built with Rust, GTK4, and libadwaita.</strong> A native binary, not a wrapped
-          web view.</li>
-      </ul>
+      <h2>Everything you need</h2>
+      <p style="font-size: 1.125rem; color: var(--text-secondary);">All in one native app, designed for speed and simplicity.</p>
+      <div class="features-grid">
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+              <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+          </div>
+          <h3>Home</h3>
+          <p>Install, update, launch, or uninstall Mocktail with isolated multi-instance slots for running multiple accounts.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+          </div>
+          <h3>FFlags Editor</h3>
+          <p>Browse and edit flags confirmed to work on Roblox's allowlist, with built-in presets for quick configuration.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </div>
+          <h3>Settings</h3>
+          <p>Configure Mocktail wrapper options through a clean GUI without touching config files manually.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+            </svg>
+          </div>
+          <h3>Advanced Tools</h3>
+          <p>Quick access to config/data folders, asset overlay management, and one-click resets.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+          </div>
+          <h3>Texture Overrides</h3>
+          <p>Manage and import custom textures with a streamlined workflow designed for Mocktail.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 18 22 12 16 6"></polyline>
+              <polyline points="8 6 2 12 8 18"></polyline>
+            </svg>
+          </div>
+          <h3>Native & Lightweight</h3>
+          <p>Built with Rust, GTK4, and libadwaita. No Electron, just a fast native binary.</p>
+        </article>
+      </div>
     </div>
   </section>
 
   <section id="honesty">
     <div class="wrap">
-      <h2>What it won't pretend</h2>
-      <ul class="plain-list">
-        <li>FastFlags outside Roblox's allowlist do nothing — Lemonyde only lists ones confirmed
-          to still work.</li>
-        <li>Running multiple instances at once is against Roblox's rules and can risk a flag on
-          your account. Lemonyde warns about this in the app, not just here.</li>
-      </ul>
+      <div class="warning-card">
+        <h2>Important Notes</h2>
+        <ul class="plain-list" style="margin-top: 1.5rem;">
+          <li><strong>Allowlist matters.</strong> FastFlags outside Roblox's allowlist do nothing — Lemonyde only lists ones confirmed to still work.</li>
+          <li><strong>Use at your own risk.</strong> Running multiple instances at once is against Roblox's rules and can risk a flag on your account. Lemonyde warns about this in the app.</li>
+          <li><strong>Unofficial project.</strong> Not affiliated with Roblox Corporation or bigrat.space.</li>
+        </ul>
+      </div>
     </div>
   </section>
 
   <section id="install">
     <div class="wrap">
-      <h2>install</h2>
-      <pre class="code-block"><code>curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash</code></pre>
-        <a href="https://github.com/EpicNeco/Lemonyde#readme">README</a>.</p>
+      <h2>Get Started</h2>
+      <p style="font-size: 1.125rem; color: var(--text-secondary); margin-bottom: 2rem;">Install with a single command on most Linux distributions</p>
+      <div class="code-block">
+        <code>curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash</code>
+      </div>
     </div>
   </section>
 
@@ -91,10 +154,12 @@
 
 <footer class="site-footer">
   <div class="wrap footer-row">
-    <p>GPL-3.0 licensed. An independent project, not affiliated with Roblox Corporation or bigrat.space.</p>
+    <p>© 2026 Lemonyde • GPL-3.0 licensed • Independent project</p>
     <div class="footer-links">
       <a href="https://github.com/EpicNeco/Lemonyde/issues">Issues</a>
+      <a href="https://github.com/EpicNeco/Lemonyde">Source</a>
       <a href="https://mocktail.space.bigrat">Mocktail</a>
+      <a href="https://dc.gg/lemonyde">Discord</a>
     </div>
   </div>
 </footer>

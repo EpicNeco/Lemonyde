@@ -2,7 +2,7 @@
 [Desktop Entry]
 Type=Application
 Name=Lemonyde
-Comment=Bootstrapper & FFlag editor for the Sober flatpak (Roblox on Linux)
+Comment=Bootstrapper & FFlag editor for the Mocktail
 Exec=lemonyde
 Icon=lemonyde
 Terminal=false

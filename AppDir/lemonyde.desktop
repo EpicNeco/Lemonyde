@@ -2,7 +2,7 @@
 [Desktop Entry]
 Type=Application
 Name=Lemonyde
-Comment=Bootstrapper & FFlag editor for the Mocktail
+Comment=Bootstrapper & FFlag editor for Mocktail
 Exec=lemonyde
 Icon=lemonyde
 Terminal=false

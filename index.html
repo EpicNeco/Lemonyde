@@ -1,2 +1,125 @@
-wip/tba/opsec/aura
-the installer works btw
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lemonyde — an unofficial bootstrapper for Mocktail</title>
+<meta name="description" content="Lemonyde is a community-made bootstrapper for Mocktail. Install, update, launch, edit FastFlags, and customize from one native GTK4 app.">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Lemonyde — an unofficial bootstrapper for Mocktail">
+<meta property="og:description" content="A native GTK4 control panel for Mocktail">
+<meta property="og:url" content="https://epicneco.github.io/Lemonyde/">
+
+<link rel="icon" type="image/svg+xml" href="assets/lemonyde.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+
+<header class="site-header">
+  <nav class="nav-wrap">
+    <a class="brand" href="#top">
+      <img src="assets/lemonyde.svg" alt="Lemonyde logo" width="24" height="24">
+      <span>Lemonyde</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#info">Info</a></li>
+      <li><a href="https://dc.gg/lemonyde">Discord</a></li>
+      <li><a href="https://github.com/EpicNeco/Lemonyde">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+
+  <section class="hero" id="top">
+    <div class="container">
+      <div class="hero-content">
+        <img class="logo" src="assets/lemonyde.svg" alt="Lemonyde" width="64" height="64">
+        <h1>Lemonyde</h1>
+        <p class="hero-subtitle">A native control panel for Mocktail</p>
+        <p class="hero-desc">Install, update, launch, edit FastFlags, and manage textures from one native GTK4 app.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#install">Get Lemonyde</a>
+          <a class="btn btn-secondary" href="https://github.com/EpicNeco/Lemonyde">Build From Source</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="container">
+      <h2 class="section-title">Features</h2>
+      <div class="features-grid">
+        <div class="feature-item">
+          <h3>Home</h3>
+          <p>Install, update, launch, or uninstall Mocktail with isolated multi-instance slots.</p>
+        </div>
+        <div class="feature-item">
+          <h3>FFlags</h3>
+          <p>Edit flags confirmed to work on Roblox's allowlist with built-in presets.</p>
+        </div>
+        <div class="feature-item">
+          <h3>Settings</h3>
+          <p>Configure Mocktail wrapper options through a clean GUI.</p>
+        </div>
+        <div class="feature-item">
+          <h3>Textures</h3>
+          <p>Manage and import custom texture overrides.</p>
+        </div>
+        <div class="feature-item">
+          <h3>Advanced</h3>
+          <p>Access config/data folders, clear overlays, or reset everything.</p>
+        </div>
+        <div class="feature-item">
+          <h3>Native</h3>
+          <p>Built with Rust, GTK4, and libadwaita. No webview.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="info">
+    <div class="container">
+      <h2 class="section-title">Info</h2>
+      <div class="tabs">
+        <button class="tab active" data-tab="about">About</button>
+        <button class="tab" data-tab="notes">Notes</button>
+        <button class="tab" data-tab="install">Install</button>
+      </div>
+      <div class="tab-content active" id="about">
+        <p>Lemonyde is a free open source bootstrapper for Mocktail.</p>
+        <p>Not affiliated with Roblox Corporation or bigrat.space</p>
+      </div>
+      <div class="tab-content" id="notes">
+        <p>FastFlags outside Roblox's allowlist do nothing — Lemonyde only lists ones confirmed to still work.</p>
+        <p>Running multiple instances is against Roblox's rules and can risk a flag on your account.</p>
+      </div>
+      <div class="tab-content" id="install">
+        <pre class="code"><code>curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash</code></pre>
+        <p><a href="https://github.com/EpicNeco/Lemonyde#readme" class="link">README</a></p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-centered">
+    <p class="footer-text">© 2026 Lemonyde • GPL-3.0 licensed</p>
+    <div class="footer-links">
+      <a href="https://github.com/EpicNeco/Lemonyde/issues">Issues</a>
+      <a href="https://github.com/EpicNeco/Lemonyde">Source</a>
+      <a href="https://mocktail.space.bigrat">Mocktail</a>
+    </div>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>

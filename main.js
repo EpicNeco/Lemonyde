@@ -45,3 +45,18 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById(targetTab).classList.add('active');
   });
 });
+
+// "Get Lemonyde" button shows install tab
+document.querySelector('a[href="#install"]')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  const infoSection = document.getElementById('info');
+  if (infoSection) {
+    infoSection.scrollIntoView({ behavior: 'smooth' });
+  }
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  const installTab = document.querySelector('.tab[data-tab="install"]');
+  const installContent = document.getElementById('install');
+  if (installTab) installTab.classList.add('active');
+  if (installContent) installContent.classList.add('active');
+});

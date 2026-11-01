@@ -18,7 +18,6 @@
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 72px;
-  background: var(--bg);
 }
 
 body {
@@ -29,7 +28,7 @@ body {
   font-size: 15px;
   -webkit-font-smoothing: antialiased;
   position: relative;
-  z-index: 0;
+  z-index: 1;
   margin: 0;
   padding: 0;
   overflow-x: hidden;
@@ -95,7 +94,7 @@ body {
 main {
   padding-top: 64px;
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 .container {
@@ -344,12 +343,14 @@ section {
 .grid-bg {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   pointer-events: none;
+  background-color: var(--bg);
   background-image:
     linear-gradient(rgba(255, 215, 0, 0.35) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 215, 0, 0.35) 1px, transparent 1px);
   background-size: 40px 40px;
+  background-position: 0 0;
   will-change: background-position;
   filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.6)) drop-shadow(0 0 8px rgba(255, 215, 0, 0.3));
 }

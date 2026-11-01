@@ -1,5 +1,5 @@
 // Grid background that slowly drifts on its own
-(() => {
+function initGrid() {
   const grid = document.getElementById('gridBg');
   if (!grid) return;
 
@@ -31,32 +31,45 @@
     requestAnimationFrame(animate);
   }
   animate();
-})();
+}
 
 // Tab functionality
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    const targetTab = tab.dataset.tab;
-    
+function initTabs() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const targetTab = tab.dataset.tab;
+      
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      
+      tab.classList.add('active');
+      document.getElementById(targetTab).classList.add('active');
+    });
+  });
+
+  // "Get Lemonyde" button shows install tab
+  document.querySelector('a[href="#install"]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const infoSection = document.getElementById('info');
+    if (infoSection) {
+      infoSection.scrollIntoView({ behavior: 'smooth' });
+    }
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    
-    tab.classList.add('active');
-    document.getElementById(targetTab).classList.add('active');
+    const installTab = document.querySelector('.tab[data-tab="install"]');
+    const installContent = document.getElementById('install');
+    if (installTab) installTab.classList.add('active');
+    if (installContent) installContent.classList.add('active');
   });
-});
+}
 
-// "Get Lemonyde" button shows install tab
-document.querySelector('a[href="#install"]')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  const infoSection = document.getElementById('info');
-  if (infoSection) {
-    infoSection.scrollIntoView({ behavior: 'smooth' });
-  }
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  const installTab = document.querySelector('.tab[data-tab="install"]');
-  const installContent = document.getElementById('install');
-  if (installTab) installTab.classList.add('active');
-  if (installContent) installContent.classList.add('active');
-});
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    initGrid();
+    initTabs();
+  });
+} else {
+  initGrid();
+  initTabs();
+}

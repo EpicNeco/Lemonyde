@@ -2,8 +2,8 @@
 name = "lemonyde"
 version = "2.0.0"
 edition = "2021"
-description = "Unofficial community bootstrapper & FFlag editor for the Sober flatpak (Roblox on Linux)"
-license = "MIT"
+description = "Unofficial community bootstrapper & FFlag editor for Mocktail"
+license = "GPL-3.0"
 
 [[bin]]
 name = "lemonyde"

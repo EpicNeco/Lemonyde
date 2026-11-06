@@ -25,6 +25,7 @@ use serde_json::{Map, Value};
 
 const APP_ID: &str = "io.github.epicneco.Lemonyde";
 const MOCKTAIL_APP_ID: &str = "space.bigrat.mocktail";
+const NIGHTCAP_APP_ID: &str = "io.github.CoderDayton.nightcap";
 
 /// Flags confirmed to be on Roblox's client-config allowlist as of the
 /// community-maintained guide at github.com/dyokism/sober-fastflags
@@ -111,12 +112,12 @@ impl Paths {
     /// Locates Mocktail's config/data directories for the install flavor.
     /// Flatpak keeps everything under `~/.var/app/<id>/`; native builds follow
     /// the XDG spec (`~/.config/mocktail`, `$XDG_DATA_HOME/mocktail`).
-    fn new(flavor: MocktailFlavor) -> Self {
+    fn new(flavor: RuntimeFlavor) -> Self {
         let (config_dir, data_dir) = match flavor {
-            MocktailFlavor::Native => (xdg_config_home().join("mocktail"), xdg_data_home().join("mocktail")),
+            RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative => (xdg_config_home().join("mocktail"), xdg_data_home().join("mocktail")),
             // Flatpak, or nothing installed yet (default to the flatpak layout).
             _ => {
-                let base = real_home().join(".var/app").join(MOCKTAIL_APP_ID);
+                let base = real_home().join(".var/app").join(flavor.app_id());
                 (base.join("config/mocktail"), base.join("data/mocktail"))
             }
         };
@@ -210,12 +211,12 @@ fn slot_home(n: u32) -> PathBuf {
 /// sandbox with `--filesystem` and HOME/XDG_* are pointed at it via
 /// `--env=`. The `flatpak` CLI itself still gets the *real* XDG_* values so
 /// it can locate the user's installation.
-fn spawn_slot_process(n: u32, flavor: MocktailFlavor) -> std::io::Result<std::process::Child> {
+fn spawn_slot_process(n: u32, flavor: RuntimeFlavor) -> std::io::Result<std::process::Child> {
     let home = slot_home(n);
     std::fs::create_dir_all(&home)?;
     seed_slot(&home, flavor);
-    let mut cmd = match flavor {
-        MocktailFlavor::Native => {
+    let mut cmd = match flavor.is_native() {
+        true => {
             prepare_native_launcher(&home)?;
             let mut cmd = Command::new(home.join("bin/mocktail"));
             cmd.env("XDG_CONFIG_HOME", home.join(".config"))
@@ -237,7 +238,7 @@ fn spawn_slot_process(n: u32, flavor: MocktailFlavor) -> std::io::Result<std::pr
                 format!("--env=XDG_DATA_HOME={}", home.join(".local/share").display()),
                 format!("--env=XDG_CACHE_HOME={}", home.join(".cache").display()),
                 format!("--env=XDG_STATE_HOME={}", home.join(".local/state").display()),
-                MOCKTAIL_APP_ID.to_string(),
+                flavor.app_id().to_string(),
             ]);
             cmd
         }
@@ -328,7 +329,7 @@ fn prepare_native_launcher(home: &Path) -> std::io::Result<()> {
 /// filesystems. Runs only when the slot hasn't been seeded yet — later
 /// payload downloads and updates stay private to the slot, and no auth /
 /// login data is ever copied (per-slot sign-in is the point).
-fn seed_slot(home: &Path, flavor: MocktailFlavor) {
+fn seed_slot(home: &Path, flavor: RuntimeFlavor) {
     let main = Paths::new(flavor);
 
     let slot_data = home.join(".local/share/mocktail");
@@ -601,15 +602,50 @@ fn value_to_string(v: &Value) -> String {
 // Mocktail install-method detection & helpers
 // --------------------------------------------------------------------------
 
-/// Which Mocktail build the user actually has (or would end up with).
+/// Which runtime build the user actually has (or would end up with).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum MocktailFlavor {
-    /// Sandboxed Flathub build (`space.bigrat.mocktail`).
-    Flatpak,
-    /// Native package from a distro repo / AUR — a `mocktail` binary on $PATH.
-    Native,
+enum RuntimeFlavor {
+    /// Sandboxed Flathub build of Mocktail (`space.bigrat.mocktail`).
+    MocktailFlatpak,
+    /// Native package of Mocktail from a distro repo / AUR.
+    MocktailNative,
+    /// Sandboxed Flathub build of Nightcap (`io.github.CoderDayton.nightcap`).
+    NightcapFlatpak,
+    /// Native package of Nightcap from a distro repo / AUR.
+    NightcapNative,
     /// Not installed (yet).
     None,
+}
+
+impl RuntimeFlavor {
+    /// Returns true if this is a native runtime.
+    fn is_native(self) -> bool {
+        matches!(self, RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative)
+    }
+
+    /// Returns the active app ID for flatpak commands.
+    fn app_id(self) -> &'static str {
+        match self {
+            RuntimeFlavor::NightcapFlatpak | RuntimeFlavor::NightcapNative => NIGHTCAP_APP_ID,
+            _ => MOCKTAIL_APP_ID,
+        }
+    }
+
+    /// Returns the native package name.
+    fn native_pkg_name(self) -> &'static str {
+        match self {
+            RuntimeFlavor::NightcapFlatpak | RuntimeFlavor::NightcapNative => "nightcap",
+            _ => "mocktail",
+        }
+    }
+
+    /// Returns a display name for the runtime.
+    fn display_name(self) -> &'static str {
+        match self {
+            RuntimeFlavor::NightcapFlatpak | RuntimeFlavor::NightcapNative => "Nightcap",
+            _ => "Mocktail",
+        }
+    }
 }
 
 fn which_cmd(name: &str) -> bool {
@@ -620,31 +656,56 @@ fn flatpak_present() -> bool {
     which_cmd("flatpak")
 }
 
-fn mocktail_installed() -> bool {
-    Command::new("flatpak")
-        .args(["info", MOCKTAIL_APP_ID])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
 
 /// Detects how Mocktail is installed: Flatpak first (it's the
 /// upstream-recommended route and wins if both are present), then a native
 /// `mocktail` binary from a distro repo/AUR package.
-fn detect_mocktail_flavor() -> MocktailFlavor {
-    if mocktail_installed() {
-        MocktailFlavor::Flatpak
-    } else if which_cmd("mocktail") {
-        MocktailFlavor::Native
+fn detect_runtime_flavor() -> RuntimeFlavor {
+    // Check Nightcap first (flatpak)
+    if Command::new("flatpak")
+        .args(["info", NIGHTCAP_APP_ID])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return RuntimeFlavor::NightcapFlatpak;
+    }
+    // Check Mocktail (flatpak)
+    if Command::new("flatpak")
+        .args(["info", MOCKTAIL_APP_ID])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return RuntimeFlavor::MocktailFlatpak;
+    }
+    // Check native
+    if which_cmd("mocktail") {
+        if is_nightcap_native_installed() {
+            return RuntimeFlavor::NightcapNative;
+        }
+        return RuntimeFlavor::MocktailNative;
+    }
+    RuntimeFlavor::None
+}
+
+fn is_nightcap_native_installed() -> bool {
+    if which_cmd("pacman") {
+        Command::new("pacman").args(["-Q", "nightcap"]).output().map(|o| o.status.success()).unwrap_or(false)
+    } else if which_cmd("rpm") {
+        Command::new("rpm").args(["-q", "nightcap"]).output().map(|o| o.status.success()).unwrap_or(false)
+    } else if which_cmd("dpkg") {
+        Command::new("dpkg").args(["-l", "nightcap"]).output().map(|o| o.status.success()).unwrap_or(false)
     } else {
-        MocktailFlavor::None
+        false
     }
 }
 
-fn mocktail_version(flavor: MocktailFlavor) -> Option<String> {
+fn flavor_version(flavor: RuntimeFlavor) -> Option<String> {
     match flavor {
-        MocktailFlavor::Flatpak => {
-            let out = Command::new("flatpak").args(["info", MOCKTAIL_APP_ID]).output().ok()?;
+        RuntimeFlavor::MocktailFlatpak | RuntimeFlavor::NightcapFlatpak => {
+            let app_id = flavor.app_id();
+            let out = Command::new("flatpak").args(["info", app_id]).output().ok()?;
             let text = String::from_utf8_lossy(&out.stdout);
             for line in text.lines() {
                 if let Some(rest) = line.trim().strip_prefix("Version:") {
@@ -653,12 +714,12 @@ fn mocktail_version(flavor: MocktailFlavor) -> Option<String> {
             }
             None
         }
-        MocktailFlavor::Native => {
+        RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative => {
             let out = Command::new("mocktail").arg("--version").output().ok()?;
             let text = String::from_utf8_lossy(&out.stdout);
             text.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string)
         }
-        MocktailFlavor::None => None,
+        RuntimeFlavor::None => None,
     }
 }
 
@@ -666,9 +727,10 @@ fn mocktail_version(flavor: MocktailFlavor) -> Option<String> {
 /// are counted via `flatpak ps` (each `flatpak run` is its own sandbox
 /// instance, which is also how we confirm a multi-instance launch took);
 /// native builds are counted by process name.
-fn running_instance_count(flavor: MocktailFlavor) -> usize {
+fn running_instance_count(flavor: RuntimeFlavor) -> usize {
     match flavor {
-        MocktailFlavor::Flatpak => {
+        RuntimeFlavor::MocktailFlatpak | RuntimeFlavor::NightcapFlatpak => {
+            let app_id = flavor.app_id();
             Command::new("flatpak")
                 .args(["ps", "--columns=application"])
                 .output()
@@ -676,12 +738,12 @@ fn running_instance_count(flavor: MocktailFlavor) -> usize {
                 .map(|o| {
                     String::from_utf8_lossy(&o.stdout)
                         .lines()
-                        .filter(|l| l.trim() == MOCKTAIL_APP_ID)
+                        .filter(|l| l.trim() == app_id)
                         .count()
                 })
                 .unwrap_or(0)
         }
-        MocktailFlavor::Native => Command::new("ps")
+        RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative => Command::new("ps")
             .args(["-eo", "comm="])
             .output()
             .map(|o| {
@@ -691,7 +753,7 @@ fn running_instance_count(flavor: MocktailFlavor) -> usize {
                     .count()
             })
             .unwrap_or(0),
-        MocktailFlavor::None => 0,
+        RuntimeFlavor::None => 0,
     }
 }
 
@@ -699,21 +761,21 @@ fn running_instance_count(flavor: MocktailFlavor) -> usize {
 /// `MOCKTAIL_TEXTURE_DUMP_DIR` set. Flatpak takes the variable as an
 /// `--env=` flag; the native binary gets it through the `env` command so
 /// `run_streaming` doesn't need per-spawn environment plumbing.
-fn launch_argv(flavor: MocktailFlavor, texture_dump_dir: Option<&std::path::Path>) -> Vec<String> {
-    match (flavor, texture_dump_dir) {
-        (MocktailFlavor::Native, Some(dir)) => vec![
+fn launch_argv(flavor: RuntimeFlavor, texture_dump_dir: Option<&std::path::Path>) -> Vec<String> {
+    match (flavor.is_native(), texture_dump_dir) {
+        (true, Some(dir)) => vec![
             "env".into(),
             format!("MOCKTAIL_TEXTURE_DUMP_DIR={}", dir.display()),
             "mocktail".into(),
         ],
-        (MocktailFlavor::Native, None) => vec!["mocktail".into()],
-        (_, Some(dir)) => vec![
+        (true, None) => vec!["mocktail".into()],
+        (false, Some(dir)) => vec![
             "flatpak".into(),
             "run".into(),
             format!("--env=MOCKTAIL_TEXTURE_DUMP_DIR={}", dir.display()),
-            MOCKTAIL_APP_ID.into(),
+            flavor.app_id().into(),
         ],
-        (_, None) => vec!["flatpak".into(), "run".into(), MOCKTAIL_APP_ID.into()],
+        (false, None) => vec!["flatpak".into(), "run".into(), flavor.app_id().into()],
     }
 }
 
@@ -730,8 +792,8 @@ enum PkgOp {
 /// first (Mocktail lives in the AUR on Arch-likes) and escalate to root
 /// themselves; other package managers get a sudo/doas prefix. Returns `None`
 /// when nothing suitable is available.
-fn native_pkg_argv(op: PkgOp) -> Option<Vec<String>> {
-    const PKG: &str = "mocktail";
+fn native_pkg_argv(op: PkgOp, flavor: RuntimeFlavor) -> Option<Vec<String>> {
+    let pkg = flavor.native_pkg_name();
 
     for helper in ["paru", "yay"] {
         if which_cmd(helper) {
@@ -742,7 +804,7 @@ fn native_pkg_argv(op: PkgOp) -> Option<Vec<String>> {
                 PkgOp::Remove => &["-Rns"],
             };
             argv.extend(flags.iter().map(|s| s.to_string()));
-            argv.push(PKG.into());
+            argv.push(pkg.into());
             return Some(argv);
         }
     }
@@ -760,13 +822,13 @@ fn native_pkg_argv(op: PkgOp) -> Option<Vec<String>> {
             }
             .into(),
         );
-        argv.extend(["-y", PKG].map(String::from));
+        argv.extend(["-y", pkg].map(String::from));
     } else if which_cmd("pacman") {
         argv.push("pacman".into());
         let flags: &[&str] = match op {
-            PkgOp::Install => &["-S", "--needed", "--noconfirm", PKG],
-            PkgOp::Update => &["-Syu", "--noconfirm", PKG],
-            PkgOp::Remove => &["-Rns", "--noconfirm", PKG],
+            PkgOp::Install => &["-S", "--needed", "--noconfirm", pkg],
+            PkgOp::Update => &["-Syu", "--noconfirm", pkg],
+            PkgOp::Remove => &["-Rns", "--noconfirm", pkg],
         };
         argv.extend(flags.iter().map(|s| s.to_string()));
     } else if which_cmd("zypper") {
@@ -779,7 +841,7 @@ fn native_pkg_argv(op: PkgOp) -> Option<Vec<String>> {
                     PkgOp::Update => "update",
                     PkgOp::Remove => "remove",
                 },
-                PKG,
+                pkg,
             ]
             .map(String::from),
         );
@@ -790,7 +852,7 @@ fn native_pkg_argv(op: PkgOp) -> Option<Vec<String>> {
         if matches!(op, PkgOp::Update) {
             argv.push("--only-upgrade".into());
         }
-        argv.push(PKG.into());
+        argv.push(pkg.into());
     } else if which_cmd("apk") {
         argv.push("apk".into());
         argv.push(
@@ -801,21 +863,21 @@ fn native_pkg_argv(op: PkgOp) -> Option<Vec<String>> {
             }
             .into(),
         );
-        argv.push(PKG.into());
+        argv.push(pkg.into());
     } else if which_cmd("xbps-install") || which_cmd("xbps-remove") {
         match op {
             PkgOp::Remove => {
                 if !which_cmd("xbps-remove") {
                     return None;
                 }
-                argv.extend(["xbps-remove", "-R", PKG].map(String::from));
+                argv.extend(["xbps-remove", "-R", pkg].map(String::from));
             }
             _ => {
                 if !which_cmd("xbps-install") {
                     return None;
                 }
                 argv.push("xbps-install".into());
-                argv.extend(if matches!(op, PkgOp::Install) { ["-Sy", PKG] } else { ["-Syu", PKG] }.map(String::from));
+                argv.extend(if matches!(op, PkgOp::Install) { ["-Sy", pkg] } else { ["-Syu", pkg] }.map(String::from));
             }
         }
     } else {
@@ -913,7 +975,7 @@ struct AppState {
     fflags: Map<String, Value>,
     /// How Mocktail is installed (Flatpak vs. native package), detected at
     /// startup. Launch/install/update/uninstall all branch on this.
-    flavor: MocktailFlavor,
+    flavor: RuntimeFlavor,
 }
 
 type SharedState = Rc<RefCell<AppState>>;
@@ -1143,7 +1205,7 @@ fn build_ui(app: &adw::Application) {
     // Detect the install flavor once up front — every page (paths, launch
     // commands, install/update/uninstall) branches on it. Detection is a
     // couple of quick subprocess checks (`flatpak info`, `which mocktail`).
-    let flavor = detect_mocktail_flavor();
+    let flavor = detect_runtime_flavor();
     let state: SharedState = Rc::new(RefCell::new(AppState {
         paths: Paths::new(flavor),
         fflags: Map::new(),
@@ -1350,10 +1412,10 @@ fn build_home_page(
             status_row.set_title("Checking Mocktail installation…");
             status_icon.set_icon_name(Some("content-loading-symbolic"));
 
-            let (sender, receiver) = async_channel::bounded::<(MocktailFlavor, Option<String>)>(1);
+            let (sender, receiver) = async_channel::bounded::<(RuntimeFlavor, Option<String>)>(1);
             thread::spawn(move || {
-                let flavor = detect_mocktail_flavor();
-                let version = mocktail_version(flavor);
+                let flavor = detect_runtime_flavor();
+                let version = flavor_version(flavor);
                 let _ = sender.send_blocking((flavor, version));
             });
 
@@ -1372,8 +1434,8 @@ fn build_home_page(
                     // installed/uninstalled between refreshes.
                     state.borrow_mut().flavor = flavor;
                     match flavor {
-                        MocktailFlavor::Flatpak => {
-                            status_row.set_title("Mocktail is installed (Flatpak)");
+                        RuntimeFlavor::MocktailFlatpak | RuntimeFlavor::NightcapFlatpak => {
+                            status_row.set_title(&format!("{} is installed (Flatpak)", flavor.display_name()));
                             status_row.set_subtitle(&version.map(|v| format!("Version {v}")).unwrap_or_else(|| "Ready to launch".into()));
                             status_icon.set_icon_name(Some("emblem-ok-symbolic"));
                             btn_launch.set_visible(true);
@@ -1381,8 +1443,8 @@ fn build_home_page(
                             btn_update.set_sensitive(true);
                             btn_uninstall.set_sensitive(true);
                         }
-                        MocktailFlavor::Native => {
-                            status_row.set_title("Mocktail is installed (native package)");
+                        RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative => {
+                            status_row.set_title(&format!("{} is installed (native package)", flavor.display_name()));
                             status_row.set_subtitle(&version.map(|v| format!("Version {v}")).unwrap_or_else(|| "Ready to launch".into()));
                             status_icon.set_icon_name(Some("emblem-ok-symbolic"));
                             btn_launch.set_visible(true);
@@ -1390,11 +1452,11 @@ fn build_home_page(
                             btn_update.set_sensitive(true);
                             btn_uninstall.set_sensitive(true);
                         }
-                        MocktailFlavor::None => {
+                        RuntimeFlavor::None => {
                             // Mirror the Install button's priority: native
                             // package first, flatpak only as a last resort.
-                            status_row.set_title("Mocktail is not installed");
-                            status_row.set_subtitle(if native_pkg_argv(PkgOp::Install).is_some() {
+                            status_row.set_title("Runtime is not installed");
+                            status_row.set_subtitle(if native_pkg_argv(PkgOp::Install, RuntimeFlavor::None).is_some() {
                                 "Install it from your distro's package manager to get started"
                             } else if flatpak_present() {
                                 "Install it from Flathub to get started"
@@ -1482,7 +1544,7 @@ fn build_home_page(
     fn launch_step(
         i: u32,
         n: u32,
-        flavor: MocktailFlavor,
+        flavor: RuntimeFlavor,
         home_log: gtk4::TextView,
         active_slots: Rc<RefCell<HashSet<u32>>>,
         slot_tx: async_channel::Sender<SlotEvent>,
@@ -1567,8 +1629,8 @@ fn build_home_page(
             .stderr(Stdio::null())
             .spawn();
         match spawned {
-            Ok(_) => toast("Launching Mocktail…"),
-            Err(e) => toast(&format!("Couldn't launch Mocktail: {e}")),
+            Ok(_) => toast(&format!("Launching {}…", flavor.display_name())),
+            Err(e) => toast(&format!("Couldn't launch {}: {e}", flavor.display_name())),
         }
     }));
 
@@ -1578,7 +1640,7 @@ fn build_home_page(
         // integrates with the rest of the system. The Flathub flatpak is
         // only a last resort, used when no supported package manager is
         // found.
-        let argv = match native_pkg_argv(PkgOp::Install) {
+        let argv = match native_pkg_argv(PkgOp::Install, RuntimeFlavor::None) {
             Some(argv) => argv,
             None => vec!["flatpak".into(), "install".into(), "-y".into(), "flathub".into(), MOCKTAIL_APP_ID.into()],
         };
@@ -1588,7 +1650,7 @@ fn build_home_page(
             clone!(#[strong] home_log, move |l| log_line(&home_log, &l)),
             clone!(#[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, move |code| {
                 set_buttons_sensitive(true);
-                toast(if code == 0 { "Mocktail installed" } else { "Install failed — see activity log" });
+                toast(if code == 0 { "Runtime installed" } else { "Install failed — see activity log" });
                 refresh_status();
             }),
         );
@@ -1598,7 +1660,7 @@ fn build_home_page(
         let flavor = state.borrow().flavor;
         set_buttons_sensitive(false);
         let argv = match flavor {
-            MocktailFlavor::Native => match native_pkg_argv(PkgOp::Update) {
+            RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative => match native_pkg_argv(PkgOp::Update, flavor) {
                 Some(argv) => argv,
                 None => {
                     set_buttons_sensitive(true);
@@ -1606,7 +1668,7 @@ fn build_home_page(
                     return;
                 }
             },
-            _ => vec!["flatpak".into(), "update".into(), "-y".into(), MOCKTAIL_APP_ID.into()],
+            _ => vec!["flatpak".into(), "update".into(), "-y".into(), flavor.app_id().into()],
         };
         log_line(&home_log, &format!("$ {}", argv.join(" ")));
         run_streaming(argv,
@@ -1622,8 +1684,8 @@ fn build_home_page(
     btn_uninstall.connect_clicked(clone!(#[strong] window, #[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, #[strong] state, move |_| {
         let flavor = state.borrow().flavor;
         let body = match flavor {
-            MocktailFlavor::Native => "This removes the native mocktail package (via your package manager). Your fflags.json and config.yaml are kept unless you also clear them in Advanced.".to_string(),
-            _ => "This removes the Mocktail flatpak. Your fflags.json and config.yaml are kept unless you also clear them in Advanced.".to_string(),
+            RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative => format!("This removes the native {} package (via your package manager). Your fflags.json and config.yaml are kept unless you also clear them in Advanced.", flavor.display_name()),
+            _ => format!("This removes the {} flatpak. Your fflags.json and config.yaml are kept unless you also clear them in Advanced.", flavor.display_name()),
         };
         confirm_dialog(&window, "Uninstall Mocktail?",
             &body,
@@ -1631,14 +1693,14 @@ fn build_home_page(
             clone!(#[strong] home_log, #[strong] toast, #[strong] refresh_status, #[strong] set_buttons_sensitive, #[strong] state, move || {
                 let flavor = state.borrow().flavor;
                 let argv = match flavor {
-                    MocktailFlavor::Native => match native_pkg_argv(PkgOp::Remove) {
+                    RuntimeFlavor::MocktailNative | RuntimeFlavor::NightcapNative => match native_pkg_argv(PkgOp::Remove, flavor) {
                         Some(argv) => argv,
                         None => {
                             toast("No supported package manager found — uninstall via your distro");
                             return;
                         }
                     },
-                    _ => vec!["flatpak".into(), "uninstall".into(), "-y".into(), MOCKTAIL_APP_ID.into()],
+                    _ => vec!["flatpak".into(), "uninstall".into(), "-y".into(), flavor.app_id().into()],
                 };
                 set_buttons_sensitive(false);
                 log_line(&home_log, &format!("$ {}", argv.join(" ")));

@@ -449,15 +449,32 @@ fi
 # 3. Flatpak + Flathub (only needed when Mocktail comes from Flatpak) —
 #    auto-install unless the user already has a native Mocktail package
 #    (distro repo / AUR — a `mocktail` binary on PATH) or --no-flatpak.
-MOCKTAIL_FLAVOR="none"
-if need_cmd flatpak && flatpak info space.bigrat.mocktail >/dev/null 2>&1; then
+# Detect which runtime is installed (prefer Nightcap if available)
+RUNTIME="mocktail"
+if need_cmd flatpak && flatpak info io.github.CoderDayton.nightcap >/dev/null 2>&1; then
   MOCKTAIL_FLAVOR="flatpak"
+  RUNTIME="nightcap"
+elif need_cmd flatpak && flatpak info space.bigrat.mocktail >/dev/null 2>&1; then
+  MOCKTAIL_FLAVOR="flatpak"
+  RUNTIME="mocktail"
 elif need_cmd mocktail; then
   MOCKTAIL_FLAVOR="native"
+  # Check if nightcap package is installed
+  if need_cmd pacman && pacman -Q nightcap >/dev/null 2>&1; then
+    RUNTIME="nightcap"
+  elif need_cmd rpm && rpm -q nightcap >/dev/null 2>&1; then
+    RUNTIME="nightcap"
+  elif need_cmd dpkg && dpkg -l nightcap >/dev/null 2>&1; then
+    RUNTIME="nightcap"
+  fi
 fi
 
 if [[ "${MOCKTAIL_FLAVOR}" == "native" ]]; then
-  info "Detected native Mocktail package ($(command -v mocktail)) — Flatpak setup not needed."
+  if [[ "${RUNTIME}" == "nightcap" ]]; then
+    info "Detected native Nightcap package ($(command -v mocktail)) — Flatpak setup not needed."
+  else
+    info "Detected native Mocktail package ($(command -v mocktail)) — Flatpak setup not needed."
+  fi
 elif ! need_cmd flatpak; then
   if [[ "${AUTO_FLATPAK}" != "1" ]]; then
     c_yellow "Flatpak isn't installed (auto-install disabled via --no-flatpak)."
@@ -535,23 +552,48 @@ mocktail_native_install() {
   pkg_install mocktail
 }
 
+nightcap_native_install() {
+  # Prefer an AUR helper on Arch-likes — Nightcap lives in the AUR there.
+  local helper=""
+  if need_cmd paru; then helper="paru"
+  elif need_cmd yay; then helper="yay"
+  fi
+  if [[ -n "${helper}" ]]; then
+    "${helper}" -S --needed --noconfirm nightcap
+    return $?
+  fi
+  pkg_install nightcap
+}
+
 if [[ "${INSTALL_MOCKTAIL_PROMPT}" != "1" ]]; then
   info "Skipping Mocktail install (--no-mocktail)."
 elif [[ "${MOCKTAIL_FLAVOR}" == "flatpak" ]]; then
-  info "Mocktail is already installed (Flatpak: space.bigrat.mocktail)."
+  if [[ "${RUNTIME}" == "nightcap" ]]; then
+    info "Nightcap is already installed (Flatpak: io.github.CoderDayton.nightcap)."
+  else
+    info "Mocktail is already installed (Flatpak: space.bigrat.mocktail)."
+  fi
 elif [[ "${MOCKTAIL_FLAVOR}" == "native" ]]; then
-  info "Mocktail is already installed (native package: $(command -v mocktail))."
+  if [[ "${RUNTIME}" == "nightcap" ]]; then
+    info "Nightcap is already installed (native package: $(command -v mocktail))."
+  else
+    info "Mocktail is already installed (native package: $(command -v mocktail))."
+  fi
 elif need_cmd flatpak; then
-  # No Mocktail anywhere, but Flatpak is available — Flathub is upstream's
-  # recommended route.
+  # No runtime anywhere, but Flatpak is available — offer Mocktail or Nightcap.
   if [[ "${INTERACTIVE}" == "1" ]]; then
-    if ask "Mocktail isn't installed yet — install it now via Flathub?"; then
+    if ask "No runtime installed — install Nightcap (Mocktail fork with extra fixes) via Flathub?"; then
+      flatpak install --user -y https://coderdayton.github.io/nightcap/nightcap.flatpakref \
+        || c_yellow "Warning: Nightcap install failed. You can install it later with: flatpak install --user https://coderdayton.github.io/nightcap/nightcap.flatpakref"
+    elif ask "Install Mocktail via Flathub instead?"; then
       flatpak install --user -y flathub space.bigrat.mocktail \
         || c_yellow "Warning: Mocktail install failed. You can install it later with: flatpak install --user -y flathub space.bigrat.mocktail"
     fi
   else
-    c_blue "→ Installing Mocktail via Flathub (automatic)…"
-    flatpak install --user -y flathub space.bigrat.mocktail \
+    c_blue "→ Installing Nightcap via Flathub (automatic)…"
+    flatpak install --user -y https://coderdayton.github.io/nightcap/nightcap.flatpakref \
+      || c_yellow "Warning: Nightcap install failed. Trying Mocktail…" \
+      && flatpak install --user -y flathub space.bigrat.mocktail \
       || c_yellow "Warning: Mocktail install failed. You can install it later with: flatpak install --user -y flathub space.bigrat.mocktail"
   fi
 else
@@ -561,13 +603,18 @@ else
     c_yellow "No Flatpak and no supported package manager found — install Mocktail manually."
   else
     if [[ "${INTERACTIVE}" == "1" ]]; then
-      if ask "Flatpak isn't available — install Mocktail natively via your package manager?"; then
+      if ask "Flatpak isn't available — install Nightcap natively via your package manager?"; then
+        nightcap_native_install \
+          || c_yellow "Warning: native Nightcap install failed (it may not exist in your repos — e.g. the AUR needs paru/yay)."
+      elif ask "Install Mocktail natively instead?"; then
         mocktail_native_install \
           || c_yellow "Warning: native Mocktail install failed (it may not exist in your repos — e.g. the AUR needs paru/yay)."
       fi
     else
-      c_blue "→ Installing Mocktail natively (automatic)…"
-      mocktail_native_install \
+      c_blue "→ Installing Nightcap natively (automatic)…"
+      nightcap_native_install \
+        || c_yellow "Warning: native Nightcap install failed. Trying Mocktail…" \
+        && mocktail_native_install \
         || c_yellow "Warning: native Mocktail install failed (it may not exist in your repos — e.g. the AUR needs paru/yay)."
     fi
   fi

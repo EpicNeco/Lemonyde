@@ -1,0 +1,11 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Type=Application
+Name=Lemonyde
+Comment=Bootstrapper & FFlag editor for Mocktail
+Exec=lemonyde
+Icon=lemonyde
+Terminal=false
+Categories=Game;Utility;
+Keywords=Roblox;Mocktail;FFlags;FastFlags;
+StartupWMClass=lemonyde

@@ -22,13 +22,18 @@ text editor: installing/updating/launching Sober, editing FastFlags
 
 # Install
 
-```bash
+```
 curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash
 ```
 
 this installs the app to `~/.local/bin` and updates it if needed
 
-**Not affiliated with Roblox Corporation or bigrat.space**
+
+or alternatively you can try the [experemental aur/pacman packages](https://github.com/epicneco/lemonyde/releases/v0.13-alpha)
+but they are pretty much useless lmao
+
+
+# **Not affiliated with Roblox Corporation or Mocktail/Nightcap Developers.**
 
 ## Features
 

@@ -1,16 +1,12 @@
 <div align="center">
   
-<img width="800" height="800" alt="lemonyde-logo" src="/assets/lemonydetitlealt.svg" />
-
-</div>
-
-<div align="center">
-
-  [![Discord](https://img.shields.io/discord/1541849281298829353?logo=discord&logoColor=white&label=discord&color=4d3dff)](https://dc.gg/lemonyde)
-
-</div>
+<img width="200" height="200" alt="lemonyde-logo" src="/assets/lemonyde.svg" />
 
 # 🍹🍋 Lemonyde 
+</div>
+
+[![Discord](https://img.shields.io/discord/1541849281298829353?logo=discord&logoColor=white&label=discord&color=4d3dff)](https://dc.gg/lemonyde)
+
 An unofficial, community-made **bootstrapper for [Mocktail](<https://mocktail.bigrat.space>)** application
 that runs Roblox on Linux. Lemonyde gives Sober a native GTK4 +
 libadwaita GUI for the stuff you'd otherwise do by hand in a terminal or

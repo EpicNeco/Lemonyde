@@ -19,7 +19,7 @@ text editor: installing/updating/launching Sober, editing FastFlags
 # Install
 
 ```
-curl -fsSL https://epicneco.github.io/Lemonyde/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/EpicNeco/Lemonyde/main/install.sh | bash
 ```
 
 this installs the app to `~/.local/bin` and updates it if needed
